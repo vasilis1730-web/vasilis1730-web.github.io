@@ -1,0 +1,15 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls",
+      "delegate_permission/common.get_login_creds"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "gr.rhodes.rodios",
+      "sha256_cert_fingerprints": [
+        "3A:60:2C:6B:0B:2D:8A:0E:CC:6F:7E:97:BF:16:C9:8F:A1:B5:6F:50:09:5C:90:D3:A2:1C:9E:0D:9B:05"
+      ]
+    }
+  }
+]
