@@ -12,8 +12,8 @@
  * το τέλος. Το κουμπί «Σύνταξη» γίνεται «Διακοπή» χωρίς να αντικατασταθεί.
  */
 import { h, field } from '../dom.js';
-import { STRINGS, errorMessage, messageForCode } from '../strings.js';
-import { describeError, reportUnexpected } from '../feedback.js';
+import { STRINGS, messageForCode } from '../strings.js';
+import { describeError, openFailureHeading, presentError, reportUnexpected } from '../feedback.js';
 import { formatUsd } from '../formatters.js';
 import { displayTitle } from '../presentation.js';
 import { ROUTES, hrefFor } from '../routes.js';
@@ -77,9 +77,10 @@ export class SummaryView {
   render() {
     this.#heading = h('h1', {}, STRINGS.summary.title);
     this.#root = h('section', { class: 'view summary-view' }, this.#heading);
-    this.#deps.library.open(this.#id).then(transcript => this.#build(transcript), error => {
-      this.#heading.textContent = STRINGS.transcript.notFound;
-      this.#root.append(h('p', {}, errorMessage(error)));
+    // API-025: και ένα σφάλμα μέσα στο #build φτάνει στο ίδιο μήνυμα.
+    this.#deps.library.open(this.#id).then(transcript => this.#build(transcript)).catch(error => {
+      this.#heading.textContent = openFailureHeading(error);
+      this.#root.append(h('p', { class: 'error' }, presentError(error)));
     });
     this.#deps.summaries.checkAvailability().then(availability => this.#setAvailability(availability), error => {
       reportUnexpected(error);

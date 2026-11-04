@@ -14,8 +14,8 @@
  * χρήστης αλλάζει μηχανή με τα βελάκια.
  */
 import { h, field, replaceContent } from '../dom.js';
-import { STRINGS, errorMessage, messageForCode } from '../strings.js';
-import { reportUnexpected } from '../feedback.js';
+import { STRINGS, messageForCode } from '../strings.js';
+import { describeError, reportUnexpected } from '../feedback.js';
 import { formatBytes, formatDuration } from '../formatters.js';
 import { displayTitle } from '../presentation.js';
 import { ROUTES, hrefFor } from '../routes.js';
@@ -300,7 +300,7 @@ export class HomeView {
     card.probing.hidden = Boolean(info || problem);
     card.noAudio.hidden = !(info && !info.hasAudio);
     card.problem.hidden = !problem;
-    card.problem.textContent = problem ? errorMessage(problem) : '';
+    card.problem.textContent = problem ? describeError(problem) : '';
   }
 
   #onJobChanged() {
@@ -332,6 +332,8 @@ export class HomeView {
       const info = await this.#deps.mediaReader.probe(file);
       if (this.#file === file) this.#fileInfo = info;
     } catch (error) {
+      // API-025: το απρόσμενο γράφεται μία φορά στην κονσόλα, εδώ, όχι σε κάθε σχεδίαση.
+      reportUnexpected(error);
       if (this.#file === file) this.#fileError = error;
     }
     if (this.#root && this.#file === file) this.#showFile();

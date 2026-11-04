@@ -4,6 +4,7 @@
  * σελίδα με ?shared=1. Εδώ παραλαμβάνεται και το ?shared=1 φεύγει από τη
  * διεύθυνση, ώστε μια ανανέωση να μην το ξαναζητά (OO-002, έξω από το main.js).
  */
+import { ROUTES, hrefFor } from './routes.js';
 
 /**
  * @param {Object} deps
@@ -17,6 +18,7 @@ export async function takeSharedFile({ location, history, inbox }) {
   if (!url.searchParams.has('shared')) return null;
   const files = await inbox.takeFiles().catch(() => []);
   url.searchParams.delete('shared');
-  history.replaceState(null, '', `${url.pathname}${url.search}${url.hash || '#/'}`);
+  // Χωρίς hash, η αρχική από το ROUTES (API-029), όχι γραμμένη με το χέρι.
+  history.replaceState(null, '', `${url.pathname}${url.search}${url.hash || hrefFor(ROUTES.home())}`);
   return files[0] || null;
 }

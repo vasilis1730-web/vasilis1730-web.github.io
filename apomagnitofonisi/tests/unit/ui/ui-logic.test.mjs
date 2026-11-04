@@ -7,7 +7,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { STRINGS, errorMessage, messageForCode, exportFormatLabel, qualityLabel, speakerLabelFor } from '../../../src/ui/strings.js';
-import { describeError, reportUnexpected, runAction } from '../../../src/ui/feedback.js';
+import { describeError, reportUnexpected, runAction, presentError, openFailureHeading } from '../../../src/ui/feedback.js';
 import { createExportLabels, describeEngine, displayTitle, engineShortName, summaryFileSuffixFor } from '../../../src/ui/presentation.js';
 import { ROUTE_PATTERNS, ROUTES, hrefFor } from '../../../src/ui/routes.js';
 import { HashRouter } from '../../../src/ui/router.js';
@@ -115,6 +115,20 @@ test('απρόσμενα σφάλματα στην κονσόλα με την α
   assert.equal(logged[0], bug, 'η αιτία, όχι το περιτύλιγμα');
   const viaAction = await captureConsoleErrors(() => runAction({ show() {} }, () => { throw wrapped; }));
   assert.deepEqual(viaAction, [bug], 'και μέσα από το runAction');
+});
+
+test('presentError και επικεφαλίδα ανοίγματος: απρόσμενα στην κονσόλα, «δεν βρέθηκε» μόνο για NOT_FOUND (API-025)', async () => {
+  const bug = new TypeError('broken record');
+  let message;
+  const logged = await captureConsoleErrors(() => { message = presentError(new AppError(ERROR_CODES.UNKNOWN, 'x', { cause: bug })); });
+  assert.deepEqual(logged, [bug]);
+  assert.equal(message, STRINGS.errors.UNKNOWN);
+  const quiet = await captureConsoleErrors(() => { message = presentError(new AppError(ERROR_CODES.NOT_FOUND)); });
+  assert.deepEqual(quiet, [], 'γνωστό σφάλμα: όχι στην κονσόλα');
+  assert.equal(message, STRINGS.errors.NOT_FOUND);
+  assert.equal(openFailureHeading(new AppError(ERROR_CODES.NOT_FOUND)), STRINGS.transcript.notFound);
+  assert.equal(openFailureHeading(new AppError(ERROR_CODES.UNKNOWN)), STRINGS.transcript.openFailed);
+  assert.equal(openFailureHeading(new TypeError('x')), STRINGS.transcript.openFailed);
 });
 
 test('παρουσίαση: ονόματα μηχανών, τίτλος χωρίς τίτλο, ετικέτες εγγράφων', () => {

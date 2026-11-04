@@ -90,6 +90,14 @@ export const BROWSER_GLOBALS = Object.freeze([
   'fetch', 'XMLHttpRequest', 'Worker', 'self', 'location', 'crypto', 'globalThis',
 ]);
 
+/**
+ * Τα ονόματα των ίδιων των global αντικειμένων: μια τοπική δήλωση με αυτά τα
+ * ονόματα ΔΕΝ εξαιρεί το module (CA-014), γιατί θα έκρυβε από τον έλεγχο κάθε
+ * πραγματική χρήση του global στο ίδιο αρχείο. Ένα module καθαρού στρώματος
+ * διαλέγει άλλο όνομα (π.χ. audioWindow).
+ */
+export const GLOBAL_OBJECT_NAMES = Object.freeze(['window', 'self', 'globalThis', 'document', 'location']);
+
 /** Το μόνο μέρος του src/ που διαβάζουν τα tools/ (σταθερές δεδομένων, π.χ. SITE_URL). */
 export const TOOLS_READABLE_SOURCE = 'src/config/';
 
@@ -513,7 +521,8 @@ function neighbours(text, start, end) {
  * Globals του browser σε ένα module καθαρού στρώματος (domain, application):
  * ένα όνομα της BROWSER_GLOBALS σε θέση global. Δεν μετρούν: ιδιότητες
  * (`x.window`), κλειδιά αντικειμένων (`{ window: … }`), ορισμοί μεθόδων
- * (`fetch() {`) και ονόματα που το module δηλώνει το ίδιο (`const window = …`).
+ * (`fetch() {`) και ονόματα που το module δηλώνει το ίδιο (`const crypto = …`),
+ * εκτός από τα ονόματα των global αντικειμένων (GLOBAL_OBJECT_NAMES, CA-014).
  * @param {{ file: string, source: string }} module
  * @returns {string[]}
  */
@@ -523,7 +532,7 @@ export function findBrowserGlobals({ file, source }) {
   const declared = declaredNames(bare);
   const problems = [];
   for (const name of BROWSER_GLOBALS) {
-    if (declared.has(name)) continue;
+    if (declared.has(name) && !GLOBAL_OBJECT_NAMES.includes(name)) continue;
     for (const match of bare.matchAll(new RegExp(`(?<![\\w$#])${name}(?![\\w$])`, 'g'))) {
       const { before, beforeBefore, after } = neighbours(bare, match.index, match.index + name.length);
       if (before === '.' && beforeBefore !== '.') continue;

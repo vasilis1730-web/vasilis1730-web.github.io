@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createZip, crc32 } from '../../../src/infrastructure/export/zip-store-writer.js';
-import { escapeXml } from '../../../src/infrastructure/export/docx-document.js';
+import { escapeXml, buildDocx } from '../../../src/infrastructure/export/docx-document.js';
 import { TxtTranscriptExporter, SrtTranscriptExporter, VttTranscriptExporter, JsonTranscriptExporter, TxtSummaryExporter } from '../../../src/infrastructure/export/text-exporters.js';
 import { DocxTranscriptExporter, DocxSummaryExporter, markdownToDocxBlocks } from '../../../src/infrastructure/export/docx-exporters.js';
 import { createTranscript, addSummary } from '../../../src/domain/transcript.js';
@@ -143,4 +143,12 @@ test('χωρίς τίτλο: τα έγγραφα γράφουν την ετικ�
   assert.match(new TxtSummaryExporter({ labels: testLabels }).render(untitled, untitled.summaries[0]), /^# Περίληψη: Μεταγραφή χωρίς τίτλο/);
   const document = readZip(new DocxTranscriptExporter({ labels: testLabels }).render(untitled)).get('word/document.xml');
   assert.match(document, /<w:t xml:space="preserve">Μεταγραφή χωρίς τίτλο<\/w:t>/);
+});
+
+test('Word: άκυρη ημερομηνία δεν σπάει την εξαγωγή, μπαίνει η τρέχουσα ώρα (API-027)', () => {
+  const before = Date.now();
+  const bytes = buildDocx([{ kind: 'paragraph', runs: [{ text: 'α' }] }], { title: 'Τ', creator: 'Απομαγνητοφώνηση', createdAt: new Date('χθες') });
+  const core = readZip(bytes).get('docProps/core.xml');
+  const when = Date.parse(core.match(/<dcterms:created[^>]*>([^<]+)</)[1]);
+  assert.ok(Number.isFinite(when) && when >= before - 2000 && when <= Date.now() + 2000);
 });

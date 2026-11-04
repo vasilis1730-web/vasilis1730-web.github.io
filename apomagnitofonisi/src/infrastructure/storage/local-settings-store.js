@@ -3,15 +3,21 @@
  * Αν ο browser δεν επιτρέπει αποθήκευση (ιδιωτική περιήγηση), οι ρυθμίσεις
  * απλώς δεν μένουν μετά το κλείσιμο.
  */
+import { requireWebStorage } from './web-storage.js';
+
 export const SETTINGS_STORAGE_KEY = 'apomagnitofonisi.settings.v1';
 
 export class LocalSettingsStore {
   #storage;
   #key;
 
-  /** @param {{ storage: Storage|null, key?: string }} deps */
+  /**
+   * @param {{ storage: Storage|null, key?: string }} deps
+   *   null: ο browser δεν επιτρέπει αποθήκη. Οτιδήποτε άλλο εκτός από Web Storage
+   *   (π.χ. undefined από λάθος σύνδεση) απορρίπτεται αμέσως (API-026).
+   */
   constructor({ storage, key = SETTINGS_STORAGE_KEY }) {
-    this.#storage = storage;
+    this.#storage = requireWebStorage(storage, 'storage του LocalSettingsStore');
     this.#key = key;
   }
 

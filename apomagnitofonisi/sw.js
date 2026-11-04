@@ -99,6 +99,7 @@ const SHELL_FILES = [
   './src/infrastructure/storage/idb.js',
   './src/infrastructure/storage/indexeddb-transcript-repository.js',
   './src/infrastructure/storage/local-settings-store.js',
+  './src/infrastructure/storage/web-storage.js',
   './src/infrastructure/vendor-loader.js',
   './src/infrastructure/whisper/local-model-selection.js',
   './src/infrastructure/whisper/local-whisper-engine.js',

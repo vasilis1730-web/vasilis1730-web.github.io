@@ -43,7 +43,7 @@ test('εξαγωγή: όνομα αρχείου με κενά, άγνωστη μ
   assert.deepEqual(service.summaryFormats, ['docx']);
   assert.deepEqual(service.exportTranscript(base, 'txt'), { fileName: 'Σύσκεψη Έργων.txt', mimeType: 'text/plain', data: 'κείμενο t1' });
   assert.throws(() => service.exportTranscript(base, 'pdf'), RangeError, 'άγνωστη μορφή είναι λάθος του κώδικα');
-  const withSummary = addSummary(base, { id: 's1', kind: 'minutes', model: 'm', createdAt: 'x', text: 'abc' }, '2026-11-04T10:00:00.000Z');
+  const withSummary = addSummary(base, { id: 's1', kind: 'minutes', model: 'm', createdAt: '2026-11-04T10:00:00.000Z', text: 'abc' }, '2026-11-04T10:00:00.000Z');
   const file = service.exportSummary(withSummary, withSummary.summaries[0], 'docx');
   assert.equal(file.fileName, 'Σύσκεψη Έργων Πρακτικά.docx');
   assert.deepEqual(Array.from(file.data), [3]);
@@ -80,6 +80,8 @@ test('ιστορικό: άνοιγμα, εισαγωγή με νέο αναγν�
   assert.equal((await library.listNewestFirst()).length, 2);
   await assert.rejects(library.importFromJson('{}'), e => e.code === ERROR_CODES.INVALID_TRANSCRIPT_FILE);
   await assert.rejects(library.importFromJson('όχι json'), e => e.code === ERROR_CODES.INVALID_TRANSCRIPT_FILE);
+  const badDate = serializeTranscript({ ...base, createdAt: 'χθες' }, { exportedAt: 'x', appVersion: '1' });
+  await assert.rejects(library.importFromJson(badDate), e => e.code === ERROR_CODES.INVALID_TRANSCRIPT_FILE, 'API-027: άκυρη ημερομηνία = άκυρο αρχείο');
   assert.equal((await library.open('t1')).title, 'Σύσκεψη_Έργων');
   await library.remove('t1');
   assert.equal((await library.listNewestFirst()).length, 1);
@@ -106,7 +108,7 @@ test('διορθώσεις: κάθε αλλαγή αποθηκεύεται, μό
   await assert.rejects(editor.renameSpeaker(t, 'S9', 'x'), e => e instanceof TranscriptRuleError && e.rule === TRANSCRIPT_RULES.UNKNOWN_SPEAKER, 'λάθος του κώδικα: περνά όπως είναι');
   await assert.rejects(editor.removeSummary(t, 'καμία'), e => e instanceof TranscriptRuleError && e.rule === TRANSCRIPT_RULES.UNKNOWN_SUMMARY);
   assert.equal(repository.saves, 5, 'τίποτα δεν αποθηκεύεται όταν η αλλαγή απορρίπτεται');
-  const withSummary = addSummary(t, { id: 's1', kind: 'brief', model: 'm', createdAt: 'x', text: 'α' }, 'x');
+  const withSummary = addSummary(t, { id: 's1', kind: 'brief', model: 'm', createdAt: '2026-11-04T10:00:00.000Z', text: 'α' }, 'x');
   assert.deepEqual((await editor.removeSummary(withSummary, 's1')).summaries, []);
 });
 

@@ -11,6 +11,7 @@
 import { createTranscript, speakersFromKeys } from '../domain/transcript.js';
 import { normalizeRecognizedText } from '../domain/text-normalize.js';
 import { isSupportedLanguageCode, explicitLanguageCode } from '../config/languages.js';
+import { isLocalQualityChoice } from '../config/models.js';
 import { AppError, ERROR_CODES, INPUT_ISSUES, invalidInput, throwIfAborted, toAppError } from './errors.js';
 import { PROGRESS_STAGES } from './progress.js';
 import { MAX_EXPECTED_SPEAKERS } from './limits.js';
@@ -69,7 +70,9 @@ export class TranscriptionService {
    * @returns {Promise<import('./ports.js').EngineAvailability>}
    */
   async checkAvailability(engineKind, options) {
-    return this.#engineFor(engineKind).checkAvailability(options);
+    const engine = this.#engineFor(engineKind);
+    requireKnownLocalQuality(options);
+    return engine.checkAvailability(options);
   }
 
   /**
@@ -152,7 +155,18 @@ function validateRequest({ media, options, textOptions }) {
   if (!options || !isSupportedLanguageCode(options.languageCode)) throw new RangeError(`μη υποστηριζόμενη γλώσσα ${options && options.languageCode}`);
   const n = options.expectedSpeakers;
   if (n != null && !(Number.isInteger(n) && n >= 1 && n <= MAX_EXPECTED_SPEAKERS)) throw new RangeError(`μη έγκυρο πλήθος ομιλητών ${n}`);
+  requireKnownLocalQuality(options);
   if (!textOptions || typeof textOptions.removeAnoTeleia !== 'boolean') throw new TypeError('λείπουν οι επιλογές κειμένου');
+}
+
+/**
+ * Ένα άγνωστο επίπεδο ποιότητας είναι λάθος του κώδικα (RangeError), όχι
+ * «η συσκευή δεν το υποστηρίζει» (API-028): έτσι το DEVICE_UNSUPPORTED της
+ * μηχανής σημαίνει μόνο αυτό που λέει.
+ */
+function requireKnownLocalQuality(options) {
+  const quality = options && options.localQuality;
+  if (quality != null && !isLocalQualityChoice(quality)) throw new RangeError(`άγνωστο επίπεδο ποιότητας ${quality}`);
 }
 
 /**

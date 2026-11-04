@@ -6,8 +6,8 @@
  * Απρόσμενα σφάλματα (API-020): ένα λάθος του κώδικα, ή ένα σφάλμα που ο
  * adapter τύλιξε ως UNKNOWN (π.χ. TypeError από αλλαγή βιβλιοθήκης), ο χρήστης
  * το βλέπει ως «Κάτι πήγε στραβά». Για να μη χάνεται, το reportUnexpected το
- * γράφει στην κονσόλα με την αρχική του αιτία. Το καλούν το runAction, η
- * TranscriptionJob, η σύνταξη περίληψης και ο έλεγχος κλειδιού.
+ * γράφει στην κονσόλα με την αρχική του αιτία. Το καλούν το runAction, το
+ * presentError, η TranscriptionJob, η σύνταξη περίληψης και ο έλεγχος κλειδιού.
  *
  * @template T
  * @typedef {{ ok: true, value: T } | { ok: false }} ActionOutcome
@@ -37,6 +37,23 @@ export function reportUnexpected(error) {
   if (isAppError(error) && error.code !== ERROR_CODES.UNKNOWN) return false;
   console.error(error && error.cause ? error.cause : error);
   return true;
+}
+
+/**
+ * Το μήνυμα για ένα σφάλμα που θα δείξει η διεπαφή, αφού το απρόσμενο γραφτεί
+ * στην κονσόλα (API-025). Για κάθε σημείο που δείχνει σφάλμα χωρίς runAction
+ * (άνοιγμα μεταγραφής, λίστα ιστορικού, ανάγνωση αρχείου).
+ * @param {unknown} error
+ * @returns {string}
+ */
+export function presentError(error) {
+  reportUnexpected(error);
+  return describeError(error);
+}
+
+/** Η επικεφαλίδα όταν δεν ανοίγει μια μεταγραφή: «δεν βρέθηκε» μόνο για NOT_FOUND (API-025). */
+export function openFailureHeading(error) {
+  return isAppError(error) && error.code === ERROR_CODES.NOT_FOUND ? STRINGS.transcript.notFound : STRINGS.transcript.openFailed;
 }
 
 /**

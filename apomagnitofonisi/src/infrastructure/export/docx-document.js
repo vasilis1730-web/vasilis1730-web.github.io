@@ -40,6 +40,8 @@ const PAGE_TEXT_WIDTH_TWIPS = 9026;
  */
 export function buildDocx(blocks, metadata) {
   const language = metadata.language || 'el-GR';
+  // API-027: μια άκυρη ημερομηνία δεν σπάει την εξαγωγή, μπαίνει η τρέχουσα ώρα.
+  const createdAt = metadata.createdAt instanceof Date && Number.isFinite(metadata.createdAt.getTime()) ? metadata.createdAt : new Date();
   const orderedLists = blocks.filter(b => b.kind === 'list' && b.ordered).length;
   const parts = [
     { path: '[Content_Types].xml', data: contentTypesXml() },
@@ -48,10 +50,10 @@ export function buildDocx(blocks, metadata) {
     { path: 'word/document.xml', data: documentXml(blocks) },
     { path: 'word/styles.xml', data: stylesXml(language) },
     { path: 'word/numbering.xml', data: numberingXml(orderedLists) },
-    { path: 'docProps/core.xml', data: coreXml(metadata) },
+    { path: 'docProps/core.xml', data: coreXml({ ...metadata, createdAt }) },
     { path: 'docProps/app.xml', data: appXml(metadata.creator) },
   ];
-  return createZip(parts, { date: metadata.createdAt });
+  return createZip(parts, { date: createdAt });
 }
 
 /* ---------------------------------------------------------------- σώμα */

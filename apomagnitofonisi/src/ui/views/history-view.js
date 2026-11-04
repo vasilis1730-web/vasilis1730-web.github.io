@@ -7,8 +7,8 @@
  * που της δίνει το AppShell μένει. Μετά από διαγραφή η εστίαση γυρίζει σε αυτήν.
  */
 import { h, replaceContent } from '../dom.js';
-import { STRINGS, historyCounts, errorMessage } from '../strings.js';
-import { runAction } from '../feedback.js';
+import { STRINGS, historyCounts } from '../strings.js';
+import { presentError, runAction } from '../feedback.js';
 import { formatBytes, formatDateTime, formatDuration } from '../formatters.js';
 import { displayTitle, engineShortName } from '../presentation.js';
 import { ROUTES, hrefFor } from '../routes.js';
@@ -47,7 +47,7 @@ export class HistoryView {
     try {
       [items, usage] = await Promise.all([library.listNewestFirst(), library.estimateStorageUsage()]);
     } catch (error) {
-      replaceContent(this.#content, h('p', { class: 'error' }, errorMessage(error)));
+      replaceContent(this.#content, h('p', { class: 'error' }, presentError(error)));
       return;
     }
     replaceContent(this.#content,

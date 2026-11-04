@@ -129,7 +129,10 @@ export class TranscriptRuleError extends Error {
 export function createTranscript(init) {
   const { id, title, createdAt, source, languageCode = null, engine } = init;
   requireText(id, 'id');
-  requireText(createdAt, 'createdAt');
+  // API-027: οι ημερομηνίες είναι έγκυρες ISO, αλλιώς ένα αλλοιωμένο .json θα
+  // περνούσε την εισαγωγή και θα αποτύγχανε αργότερα (π.χ. στην εξαγωγή Word).
+  requireTimestamp(createdAt, 'createdAt');
+  if (init.updatedAt !== undefined) requireTimestamp(init.updatedAt, 'updatedAt');
   if (!source || typeof source !== 'object') throw new TranscriptRuleError('λείπει το source');
   if (!engine || !Object.values(ENGINE_KINDS).includes(engine.kind)) throw new TranscriptRuleError(`άγνωστη μηχανή ${engine && engine.kind}`);
 
@@ -340,6 +343,12 @@ function requireText(value, name) {
   if (typeof value !== 'string' || !value.trim()) throw new TranscriptRuleError(`λείπει το ${name}`);
 }
 
+/** Ημερομηνία ISO που διαβάζεται (API-027). */
+function requireTimestamp(value, name) {
+  requireText(value, name);
+  if (!Number.isFinite(Date.parse(value))) throw new TranscriptRuleError(`μη έγκυρη ημερομηνία στο ${name}: ${value}`);
+}
+
 function nonNegativeNumber(value, fallback) {
   const n = Number(value);
   return Number.isFinite(n) && n >= 0 ? n : fallback;
@@ -378,7 +387,8 @@ function copySegment(seg) {
 function copySummary(s) {
   requireText(s.id, 'summary.id');
   if (!Object.values(SUMMARY_KINDS).includes(s.kind)) throw new TranscriptRuleError(`άγνωστο είδος περίληψης ${s.kind}`);
-  const copy = { id: s.id, kind: s.kind, model: String(s.model || ''), createdAt: String(s.createdAt || ''), text: String(s.text ?? '') };
+  requireTimestamp(s.createdAt, 'summary.createdAt');
+  const copy = { id: s.id, kind: s.kind, model: String(s.model || ''), createdAt: s.createdAt, text: String(s.text ?? '') };
   if (s.instruction) copy.instruction = String(s.instruction);
   if (s.truncated) copy.truncated = true;
   return copy;

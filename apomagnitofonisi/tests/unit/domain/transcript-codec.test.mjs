@@ -25,3 +25,12 @@ test('άκυρα αρχεία απορρίπτονται με TranscriptFileErro
   assert.throws(() => deserializeTranscript('{"format":"apomagnitofonisi-transcript","schemaVersion":99}'), TranscriptFileError);
   assert.throws(() => deserializeTranscript(JSON.stringify({ format: 'apomagnitofonisi-transcript', schemaVersion: 1, transcript: { id: '' } })), TranscriptFileError);
 });
+
+test('άκυρες ημερομηνίες απορρίπτονται στην εισαγωγή, όχι αργότερα στην εξαγωγή (API-027)', () => {
+  const file = changes => serializeTranscript({ ...transcript, ...changes }, { exportedAt: '2026-11-04T11:00:00.000Z', appVersion: '1.0.0' });
+  assert.throws(() => deserializeTranscript(file({ createdAt: 'χθες' })), /μη έγκυρη ημερομηνία στο createdAt/);
+  assert.throws(() => deserializeTranscript(file({ updatedAt: 'ποτέ' })), /μη έγκυρη ημερομηνία στο updatedAt/);
+  assert.throws(() => deserializeTranscript(file({ summaries: [{ id: 's1', kind: 'brief', model: 'm', createdAt: '', text: 'x' }] })), TranscriptFileError, 'περίληψη χωρίς ημερομηνία');
+  assert.throws(() => deserializeTranscript(file({ summaries: [{ id: 's1', kind: 'brief', model: 'm', createdAt: '31/12', text: 'x' }] })), /summary\.createdAt/);
+  assert.doesNotThrow(() => deserializeTranscript(file({ summaries: [{ id: 's1', kind: 'brief', model: 'm', createdAt: '2026-11-04T12:00:00.000Z', text: 'x' }] })));
+});

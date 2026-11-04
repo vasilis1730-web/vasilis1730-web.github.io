@@ -92,13 +92,13 @@ export class AudioWindowAssembler {
     const samples = this.#buffer.slice(0, count);
     this.#buffer.copyWithin(0, count, this.#length);
     this.#length -= count;
-    const window = {
+    const audioWindow = {
       startSec: this.#emittedSamples / this.#rules.sampleRate,
       samples,
       isSilent: rms(samples) < this.#rules.silenceRms,
     };
     this.#emittedSamples += count;
-    return window;
+    return audioWindow;
   }
 }
 

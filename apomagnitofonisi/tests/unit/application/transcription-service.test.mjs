@@ -64,6 +64,7 @@ test('άκυρα αιτήματα: το κενό αρχείο το διορθώ�
   await assert.rejects(request({ options: { ...options, expectedSpeakers: 40 } }), RangeError);
   await assert.rejects(request({ options: { ...options, expectedSpeakers: 1.5 } }), RangeError);
   await assert.rejects(request({ engineKind: 'whatever' }), RangeError);
+  await assert.rejects(request({ options: { ...options, localQuality: 'ultra' } }), /άγνωστο επίπεδο ποιότητας ultra/, 'API-028: λάθος του κώδικα, όχι DEVICE_UNSUPPORTED');
   await assert.rejects(request({ textOptions: undefined }), TypeError);
   assert.equal(engine.requests.length, 0, 'κανένα άκυρο αίτημα δεν φτάνει στη μηχανή');
   assert.equal(repository.saves, 0);
@@ -96,5 +97,6 @@ test('διαθεσιμότητα, λίστα μηχανών και επίπεδ�
   assert.deepEqual(await s.describeQualityPresets('local'), presets);
   assert.equal(await s.describeQualityPresets('elevenlabs'), null, 'μηχανή χωρίς επίπεδα ποιότητας');
   await assert.rejects(s.checkAvailability('whatever'), RangeError);
+  await assert.rejects(s.checkAvailability('local', { ...options, localQuality: 'ultra' }), RangeError, 'API-028');
   await assert.rejects(s.describeQualityPresets('whatever'), RangeError);
 });

@@ -12,8 +12,8 @@
  * άρα μια νέα διόρθωση δεν χρειάζεται να ξέρει ποια μέρη αφορά.
  */
 import { h, field } from '../dom.js';
-import { STRINGS, errorMessage } from '../strings.js';
-import { runAction } from '../feedback.js';
+import { STRINGS } from '../strings.js';
+import { openFailureHeading, presentError, runAction } from '../feedback.js';
 import { formatDateTime, formatDuration } from '../formatters.js';
 import { describeEngine, displayTitle } from '../presentation.js';
 import { ROUTES, hrefFor } from '../routes.js';
@@ -70,9 +70,10 @@ export class TranscriptView {
     // άρα η εστίαση που της δίνει το AppShell δεν χάνεται (OO-001).
     this.#heading = h('h1', {}, STRINGS.common.loading);
     this.#root = h('section', { class: 'view transcript-view' }, this.#heading);
-    this.#deps.library.open(this.#id).then(transcript => this.#show(transcript), error => {
-      this.#heading.textContent = STRINGS.transcript.notFound;
-      this.#root.append(h('p', {}, errorMessage(error)), h('a', { href: hrefFor(ROUTES.history()) }, STRINGS.nav.history));
+    // API-025: και ένα σφάλμα μέσα στο #show φτάνει στο ίδιο μήνυμα (όχι «Φόρτωση…» για πάντα).
+    this.#deps.library.open(this.#id).then(transcript => this.#show(transcript)).catch(error => {
+      this.#heading.textContent = openFailureHeading(error);
+      this.#root.append(h('p', { class: 'error' }, presentError(error)), h('a', { href: hrefFor(ROUTES.history()) }, STRINGS.nav.history));
     });
     return this.#root;
   }

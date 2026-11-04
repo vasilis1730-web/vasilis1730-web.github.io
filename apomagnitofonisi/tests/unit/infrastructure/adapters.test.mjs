@@ -58,7 +58,12 @@ test('κλειδιά: στη συσκευή ή μόνο στην καρτέλα,
   assert.equal(session.getItem(KEYS_STORAGE_KEY), null, 'φεύγουν από την καρτέλα');
   const broken = new BrowserKeyStore({ localStorage: { getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); }, removeItem() {} }, sessionStorage: null });
   broken.setKey('elevenlabs', 'x');
-  assert.equal(broken.getKey('elevenlabs'), null, 'χωρίς αποθήκευση δεν σπάει');
+  assert.equal(broken.getKey('elevenlabs'), 'x', 'API-026: ο browser αρνείται την αποθήκευση, το κλειδί ισχύει όσο είναι ανοιχτή η σελίδα');
+  broken.removeKey('elevenlabs');
+  assert.equal(broken.getKey('elevenlabs'), null);
+  broken.setKey('anthropic', 'y');
+  broken.clear();
+  assert.equal(broken.getKey('anthropic'), null, 'η διαγραφή σβήνει και τη μνήμη');
 });
 
 test('κλειδιά: το clear σβήνει κλειδιά και επιλογή διατήρησης και από τις δύο αποθήκες', () => {
@@ -84,7 +89,8 @@ test('κλειδιά: λάθος σύνδεση (όχι Web Storage) απορρ�
   assert.throws(() => new BrowserKeyStore({ localStorage: null, sessionStorage: undefined }), TypeError, 'undefined δεν είναι «χωρίς αποθήκη»');
   const withoutStorage = new BrowserKeyStore({ localStorage: null, sessionStorage: null });
   withoutStorage.setKey('elevenlabs', 'x');
-  assert.equal(withoutStorage.getKey('elevenlabs'), null, 'null: ο browser δεν επιτρέπει αποθήκη');
+  assert.equal(withoutStorage.getKey('elevenlabs'), 'x', 'null: χωρίς αποθήκη, το κλειδί μένει στη μνήμη της σελίδας (API-026)');
+  assert.equal(new BrowserKeyStore({ localStorage: null, sessionStorage: null }).getKey('elevenlabs'), null, 'σε νέα σελίδα δεν υπάρχει');
 });
 
 test('ρυθμίσεις: JSON, άκυρο περιεχόμενο και χωρίς αποθήκευση', () => {
@@ -98,6 +104,8 @@ test('ρυθμίσεις: JSON, άκυρο περιεχόμενο και χωρ�
   store.clear();
   assert.equal(storage.getItem('apomagnitofonisi.settings.v1'), null);
   assert.equal(new LocalSettingsStore({ storage: null }).load(), null);
+  assert.throws(() => new LocalSettingsStore({ storage: undefined }), TypeError, 'API-026: λάθος σύνδεση απορρίπτεται, δεν χάνονται σιωπηλά οι ρυθμίσεις');
+  assert.throws(() => new LocalSettingsStore({ storage: { estimateUsage() {} } }), TypeError);
 });
 
 test('εφεδρικός αναγνώστης: μόνο όταν ο κύριος δεν υποστηρίζει τη μορφή, η συμπίεση μόνο από τον κύριο', async () => {

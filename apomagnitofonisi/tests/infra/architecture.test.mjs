@@ -244,7 +244,9 @@ test('τα καθαρά στρώματα: globals του browser σε θέση g
   // Με τη σειρά της BROWSER_GLOBALS (window, document, navigator, localStorage, …, fetch).
   assert.deepEqual(problems.map(p => p.match(/:(\d+): «(\w+)»/).slice(1)), [['3', 'window'], ['4', 'navigator'], ['2', 'localStorage'], ['1', 'fetch']]);
   assert.match(problems[0], /src\/application\/x\.js:\d+: «\w+» είναι global του browser: το στρώμα application μένει καθαρό/);
-  assert.deepEqual(findBrowserGlobals({ file: 'src/domain/w.js', source: 'const window = { start: 0 };\nreturn window;' }), [], 'τοπικό όνομα που σκιάζει το global');
+  assert.deepEqual(findBrowserGlobals({ file: 'src/domain/c.js', source: 'const crypto = { id: 1 };\nreturn crypto;' }), [], 'τοπικό όνομα που σκιάζει ένα global');
+  assert.equal(findBrowserGlobals({ file: 'src/domain/w.js', source: 'const window = { start: 0 };\nreturn window;' }).length, 2,
+    'CA-014: τα ονόματα των global αντικειμένων (window, self, document…) δεν εξαιρούνται ούτε όταν δηλώνονται τοπικά');
   assert.deepEqual(findBrowserGlobals({ file: 'src/infrastructure/x.js', source }), [], 'το infrastructure δεν είναι καθαρό στρώμα');
 });
 
