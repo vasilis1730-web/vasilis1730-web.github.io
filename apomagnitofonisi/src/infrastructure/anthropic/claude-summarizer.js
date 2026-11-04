@@ -12,10 +12,12 @@
  *   την αρχή (onRestart) και το τελικό είναι του εφεδρικού.
  * - Χωρίς thinking/temperature/top_p/top_k: το Opus 5.5 σκέφτεται πάντα
  *   προσαρμοστικά και η ένταση ρυθμίζεται μόνο με το effort.
+ * - Διαθεσιμότητα (OO-015): χωρίς κλειδί Anthropic δεν γράφεται περίληψη. Το
+ *   ξέρει μόνο αυτός ο adapter, η διεπαφή ρωτά την υπηρεσία.
  */
 import { AppError, ERROR_CODES } from '../../application/errors.js';
 import { findClaudeModel } from '../../config/models.js';
-import { createAnthropicClient, anthropicErrorToAppError } from './anthropic-client.js';
+import { createAnthropicClient, appErrorFromAnthropicError } from './anthropic-client.js';
 
 export const SERVER_FALLBACK_BETA = 'server-side-fallback-2026-07-01';
 const MAX_OUTPUT_TOKENS = 64_000;
@@ -35,17 +37,22 @@ export class ClaudeSummarizer {
     this.#getApiKey = getApiKey;
   }
 
+  /** @returns {Promise<import('../../application/ports.js').Availability>} */
+  async checkAvailability() {
+    return this.#getApiKey() ? { available: true } : { available: false, reason: ERROR_CODES.KEY_MISSING };
+  }
+
   /**
    * @param {import('../../application/ports.js').SummaryRequest} request
    * @returns {Promise<import('../../application/ports.js').SummaryResult>}
    */
-  async summarize({ systemPrompt, transcriptText, instruction, modelId, signal, onText, onRestart }) {
+  async summarize({ systemPrompt, transcriptText, promptInstruction, modelId, signal, onText, onRestart }) {
     const apiKey = this.#getApiKey();
     if (!apiKey) throw new AppError(ERROR_CODES.KEY_MISSING, 'λείπει το κλειδί Anthropic');
     const { client, sdk } = await createAnthropicClient(this.#loadSdk, apiKey);
     let restarted = false;
     try {
-      const stream = client.beta.messages.stream(buildRequest({ systemPrompt, transcriptText, instruction, modelId }), { signal });
+      const stream = client.beta.messages.stream(buildMessagesRequest({ systemPrompt, transcriptText, promptInstruction, modelId }), { signal });
       stream.on('streamEvent', event => {
         if (event.type === 'content_block_start' && event.content_block && event.content_block.type === 'fallback') {
           restarted = true;
@@ -57,13 +64,13 @@ export class ClaudeSummarizer {
       if (message.stop_reason === 'refusal') throw new AppError(ERROR_CODES.REFUSED, 'το μοντέλο αρνήθηκε', { details: { category: message.stop_details && message.stop_details.category } });
       return { text: finalText(message.content), modelId: message.model || modelId, truncated: message.stop_reason === 'max_tokens', restarted };
     } catch (error) {
-      throw anthropicErrorToAppError(error, sdk);
+      throw appErrorFromAnthropicError(error, sdk);
     }
   }
 }
 
-/** Το σώμα του αιτήματος (εξάγεται για έλεγχο από τα tests). */
-export function buildRequest({ systemPrompt, transcriptText, instruction, modelId }) {
+/** Το σώμα του αιτήματος Messages API (εξάγεται για έλεγχο από τα tests). */
+export function buildMessagesRequest({ systemPrompt, transcriptText, promptInstruction, modelId }) {
   const request = {
     model: modelId,
     max_tokens: MAX_OUTPUT_TOKENS,
@@ -73,7 +80,7 @@ export function buildRequest({ systemPrompt, transcriptText, instruction, modelI
       role: 'user',
       content: [
         { type: 'text', text: transcriptText, cache_control: { type: 'ephemeral' } },
-        { type: 'text', text: instruction },
+        { type: 'text', text: promptInstruction },
       ],
     }],
   };

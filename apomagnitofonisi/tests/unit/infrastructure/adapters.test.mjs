@@ -8,8 +8,8 @@ import { detectCapabilities, createCachedCapabilityDetector } from '../../../src
 import { BrowserDeviceStorage } from '../../../src/infrastructure/platform/device-storage.js';
 import { BrowserFileDelivery } from '../../../src/infrastructure/platform/file-delivery.js';
 import { BrowserClipboard } from '../../../src/infrastructure/platform/clipboard.js';
-import { ModelCache, MODEL_CACHE_NAMES } from '../../../src/infrastructure/platform/model-cache.js';
-import { SharedFileInbox, SHARE_INBOX_CACHE, SHARED_FILE_NAME_HEADER } from '../../../src/infrastructure/platform/shared-file-inbox.js';
+import { BrowserModelCache, MODEL_CACHE_NAMES } from '../../../src/infrastructure/platform/model-cache.js';
+import { BrowserSharedFileInbox, SHARE_INBOX_CACHE, SHARED_FILE_NAME_HEADER } from '../../../src/infrastructure/platform/shared-file-inbox.js';
 import { createRandomIdGenerator } from '../../../src/infrastructure/platform/random-ids.js';
 import { AppError, ERROR_CODES } from '../../../src/application/errors.js';
 
@@ -40,13 +40,13 @@ class MemoryCaches {
 test('κλειδιά: στη συσκευή ή μόνο στην καρτέλα, με μεταφορά ανάμεσα', () => {
   const device = new MemoryStorage();
   const session = new MemoryStorage();
-  const store = new BrowserKeyStore({ deviceStorage: device, sessionStorage: session });
-  assert.equal(store.keyRetention(), 'device');
+  const store = new BrowserKeyStore({ localStorage: device, sessionStorage: session });
+  assert.equal(store.getKeyRetention(), 'device');
   store.setKey('elevenlabs', 'e1');
   store.setKey('anthropic', 'a1');
   assert.deepEqual(JSON.parse(device.getItem(KEYS_STORAGE_KEY)), { elevenlabs: 'e1', anthropic: 'a1' });
   store.setKeyRetention('session');
-  assert.equal(store.keyRetention(), 'session');
+  assert.equal(store.getKeyRetention(), 'session');
   assert.equal(device.getItem(KEYS_STORAGE_KEY), null, 'φεύγουν από τη συσκευή');
   assert.equal(store.getKey('anthropic'), 'a1');
   assert.ok(session.getItem(KEYS_STORAGE_KEY));
@@ -55,7 +55,7 @@ test('κλειδιά: στη συσκευή ή μόνο στην καρτέλα,
   store.setKeyRetention('device');
   assert.equal(store.getKey('elevenlabs'), 'e1');
   assert.equal(session.getItem(KEYS_STORAGE_KEY), null, 'φεύγουν από την καρτέλα');
-  const broken = new BrowserKeyStore({ deviceStorage: { getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); }, removeItem() {} }, sessionStorage: null });
+  const broken = new BrowserKeyStore({ localStorage: { getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); }, removeItem() {} }, sessionStorage: null });
   broken.setKey('elevenlabs', 'x');
   assert.equal(broken.getKey('elevenlabs'), null, 'χωρίς αποθήκευση δεν σπάει');
 });
@@ -63,7 +63,7 @@ test('κλειδιά: στη συσκευή ή μόνο στην καρτέλα,
 test('κλειδιά: το clear σβήνει κλειδιά και επιλογή διατήρησης και από τις δύο αποθήκες', () => {
   const device = new MemoryStorage();
   const session = new MemoryStorage();
-  const store = new BrowserKeyStore({ deviceStorage: device, sessionStorage: session });
+  const store = new BrowserKeyStore({ localStorage: device, sessionStorage: session });
   store.setKey('elevenlabs', 'e1');
   store.setKeyRetention('session');
   store.setKey('anthropic', 'a1');
@@ -72,9 +72,18 @@ test('κλειδιά: το clear σβήνει κλειδιά και επιλογ
   assert.equal(device.getItem(KEYS_STORAGE_KEY), null);
   assert.equal(session.getItem(KEYS_STORAGE_KEY), null);
   assert.equal(device.getItem(KEYS_MODE_STORAGE_KEY), null, 'ούτε η επιλογή «μόνο στην καρτέλα» μένει');
-  assert.equal(store.keyRetention(), 'device');
+  assert.equal(store.getKeyRetention(), 'device');
   assert.equal(store.getKey('elevenlabs'), null);
   assert.equal(session.getItem('άλλο'), 'μένει', 'σβήνει μόνο τα δικά του');
+});
+
+test('κλειδιά: λάθος σύνδεση (όχι Web Storage) απορρίπτεται αμέσως, δεν χάνονται σιωπηλά τα κλειδιά (API-018)', () => {
+  const deviceStoragePort = { estimateUsage: async () => ({}), requestPersistence: async () => true };
+  assert.throws(() => new BrowserKeyStore({ localStorage: deviceStoragePort, sessionStorage: null }), TypeError);
+  assert.throws(() => new BrowserKeyStore({ localStorage: null, sessionStorage: undefined }), TypeError, 'undefined δεν είναι «χωρίς αποθήκη»');
+  const withoutStorage = new BrowserKeyStore({ localStorage: null, sessionStorage: null });
+  withoutStorage.setKey('elevenlabs', 'x');
+  assert.equal(withoutStorage.getKey('elevenlabs'), null, 'null: ο browser δεν επιτρέπει αποθήκη');
 });
 
 test('ρυθμίσεις: JSON, άκυρο περιεχόμενο και χωρίς αποθήκευση', () => {
@@ -95,21 +104,21 @@ test('εφεδρικός αναγνώστης: μόνο όταν ο κύριος
   const compactCalls = [];
   const primary = {
     async probe(m) { if (m.kind === 'amr') throw unsupported(); return { from: 'primary' }; },
-    async *readMono16k(m) { if (m.kind === 'amr') throw unsupported(); yield 'p'; if (m.kind === 'broken') throw unsupported(); },
+    async *readMonoPcm(m) { if (m.kind === 'amr') throw unsupported(); yield 'p'; if (m.kind === 'broken') throw unsupported(); },
     async extractCompactAudio(m, options) { compactCalls.push(options); if (m.kind === 'amr') throw unsupported(); return { audio: 'compact', compacted: true }; },
   };
   const fallback = {
     async probe() { return { from: 'fallback' }; },
-    async *readMono16k() { yield 'f'; },
+    async *readMonoPcm() { yield 'f'; },
     async extractCompactAudio() { throw new Error('ο εφεδρικός δεν πρέπει να καλείται για συμπίεση'); },
   };
   const reader = new FallbackMediaReader({ primary, fallback });
   const collect = async it => { const out = []; for await (const x of it) out.push(x); return out; };
   assert.deepEqual(await reader.probe({ kind: 'mp3' }), { from: 'primary' });
   assert.deepEqual(await reader.probe({ kind: 'amr' }), { from: 'fallback' });
-  assert.deepEqual(await collect(reader.readMono16k({ kind: 'mp3' })), ['p']);
-  assert.deepEqual(await collect(reader.readMono16k({ kind: 'amr' })), ['f']);
-  await assert.rejects(collect(reader.readMono16k({ kind: 'broken' })), e => e.code === ERROR_CODES.UNSUPPORTED_MEDIA, 'όχι εφεδρεία στη μέση της ροής');
+  assert.deepEqual(await collect(reader.readMonoPcm({ kind: 'mp3' })), ['p']);
+  assert.deepEqual(await collect(reader.readMonoPcm({ kind: 'amr' })), ['f']);
+  await assert.rejects(collect(reader.readMonoPcm({ kind: 'broken' })), e => e.code === ERROR_CODES.UNSUPPORTED_MEDIA, 'όχι εφεδρεία στη μέση της ροής');
   const onFraction = () => {};
   assert.deepEqual(await reader.extractCompactAudio({ kind: 'mp3' }, { onFraction }), { audio: 'compact', compacted: true });
   assert.equal(compactCalls[0].onFraction, onFraction, 'οι επιλογές περνούν στον κύριο');
@@ -196,7 +205,7 @@ test('πρόχειρο: αντιγραφή, και DEVICE_UNSUPPORTED όταν �
 
 test('μοντέλα στη συσκευή: μέγεθος από τα Content-Length και διαγραφή', async () => {
   const caches = new MemoryCaches();
-  const models = new ModelCache({ caches });
+  const models = new BrowserModelCache({ caches });
   assert.equal(await models.estimateSizeBytes(), 0);
   const cache = await caches.open(MODEL_CACHE_NAMES[0]);
   await cache.put('https://hf/a.onnx', new Response('abc', { headers: { 'Content-Length': '1000' } }));
@@ -204,12 +213,12 @@ test('μοντέλα στη συσκευή: μέγεθος από τα Content-L
   assert.equal(await models.estimateSizeBytes(), 1024);
   await models.clear();
   assert.equal(await caches.has(MODEL_CACHE_NAMES[0]), false);
-  assert.equal(await new ModelCache({ caches: undefined }).estimateSizeBytes(), null);
+  assert.equal(await new BrowserModelCache({ caches: undefined }).estimateSizeBytes(), null);
 });
 
 test('αρχεία από κοινή χρήση: παραλαβή μία φορά, και διαγραφή', async () => {
   const caches = new MemoryCaches();
-  const inbox = new SharedFileInbox({ caches });
+  const inbox = new BrowserSharedFileInbox({ caches });
   const cache = await caches.open(SHARE_INBOX_CACHE);
   await cache.put('https://app/shared/1', new Response(new Blob(['ήχος'], { type: 'audio/mpeg' }), { headers: { [SHARED_FILE_NAME_HEADER]: encodeURIComponent('Σύσκεψη Έργων.mp3') } }));
   const files = await inbox.takeFiles();
@@ -218,7 +227,7 @@ test('αρχεία από κοινή χρήση: παραλαβή μία φορ�
   await cache.put('https://app/shared/2', new Response('x'));
   await inbox.clear();
   assert.equal(await caches.has(SHARE_INBOX_CACHE), false);
-  assert.deepEqual(await new SharedFileInbox({ caches: undefined }).takeFiles(), []);
+  assert.deepEqual(await new BrowserSharedFileInbox({ caches: undefined }).takeFiles(), []);
 });
 
 test('αναγνωριστικά από το crypto.randomUUID', () => {

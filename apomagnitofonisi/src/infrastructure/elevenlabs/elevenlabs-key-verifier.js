@@ -5,9 +5,9 @@
  * θεωρείται έγκυρο. Υλοποιεί τη θύρα KeyVerifier.
  */
 import { AppError, ERROR_CODES } from '../../application/errors.js';
-import { KEY_PROVIDERS } from '../../application/api-key-service.js';
+import { KEY_PROVIDERS } from '../../application/key-providers.js';
 import { ELEVENLABS_API } from '../../config/endpoints.js';
-import { elevenLabsErrorFor } from './elevenlabs-response.js';
+import { appErrorFromElevenLabsResponse } from './elevenlabs-response.js';
 
 export class ElevenLabsKeyVerifier {
   provider = KEY_PROVIDERS.ELEVENLABS;
@@ -27,7 +27,7 @@ export class ElevenLabsKeyVerifier {
     }
     if (response.ok) return;
     const text = await response.text().catch(() => '');
-    const error = elevenLabsErrorFor(response.status, text);
+    const error = appErrorFromElevenLabsResponse(response.status, text);
     if (response.status === 401 && error.details.providerStatus === 'missing_permissions') return;
     throw error;
   }

@@ -24,7 +24,7 @@ test('μεταγραφή: καθαρό κείμενο, ομιλητές με σ�
       { start: 0, end: 2.5, speakerKey: 'speaker_1', text: ` Καλημέρα${ANO} ξεκινάμε `, words: [{ text: `Καλημέρα${ANO}`, start: 0, end: 1 }, { text: 'ξεκινάμε', start: 1.2, end: 2.5 }] },
       { start: 5, end: 6, speakerKey: 'speaker_0', text: '   ' },
     ],
-    languageCode: 'el', durationSec: 6, model: 'scribe_v2',
+    languageCode: 'el', durationSec: 6, modelId: 'scribe_v2',
   });
   const { service: s, repository, deviceStorage } = service(engine);
   const progress = [];
@@ -45,7 +45,7 @@ test('μεταγραφή: καθαρό κείμενο, ομιλητές με σ�
 });
 
 test('χωρίς ομιλητές και με «αυτόματη» γλώσσα: languageCode null όταν δεν το δίνει η μηχανή', async () => {
-  const engine = new FakeEngine('local', { segments: [{ start: 0, end: 1, speakerKey: null, text: 'ναι ναι ναι ναι ναι' }], languageCode: null, durationSec: null, model: 'whisper' });
+  const engine = new FakeEngine('local', { segments: [{ start: 0, end: 1, speakerKey: null, text: 'ναι ναι ναι ναι ναι' }], languageCode: null, durationSec: null, modelId: 'whisper' });
   const { service: s } = service(engine);
   const t = await s.transcribe({ media: fakeMedia(), engineKind: 'local', options: { ...options, languageCode: 'auto' }, textOptions: { removeAnoTeleia: false } });
   assert.equal(t.languageCode, null);
@@ -55,7 +55,7 @@ test('χωρίς ομιλητές και με «αυτόματη» γλώσσα:
 });
 
 test('άκυρα αιτήματα: το κενό αρχείο το διορθώνει ο χρήστης, τα υπόλοιπα είναι λάθη του κώδικα', async () => {
-  const engine = new FakeEngine('local', { segments: [], model: 'm' });
+  const engine = new FakeEngine('local', { segments: [], modelId: 'm' });
   const { service: s, repository } = service(engine);
   const request = job => s.transcribe({ media: fakeMedia(), engineKind: 'local', options, textOptions, ...job });
   await assert.rejects(request({ media: fakeMedia({ size: 0 }) }), e => e instanceof AppError && e.code === ERROR_CODES.INVALID_INPUT && e.details.reason === INPUT_ISSUES.EMPTY_FILE);
@@ -77,8 +77,8 @@ test('μη διαθέσιμη μηχανή, σφάλματα μηχανής κα
   await assert.rejects(failing.transcribe({ media: fakeMedia(), engineKind: 'elevenlabs', options, textOptions }), e => e instanceof AppError && e.code === ERROR_CODES.UNKNOWN);
 
   const controller = new AbortController();
-  const engine = new FakeEngine('local', { segments: [{ start: 0, end: 1, speakerKey: null, text: 'α' }], model: 'm' });
-  engine.recognize = async () => { controller.abort(); return { segments: [], model: 'm' }; };
+  const engine = new FakeEngine('local', { segments: [{ start: 0, end: 1, speakerKey: null, text: 'α' }], modelId: 'm' });
+  engine.recognize = async () => { controller.abort(); return { segments: [], modelId: 'm' }; };
   const { service: s, repository } = service(engine);
   await assert.rejects(s.transcribe({ media: fakeMedia(), engineKind: 'local', options, textOptions, signal: controller.signal }), e => e.code === ERROR_CODES.CANCELLED);
   assert.equal(repository.saves, 0, 'τίποτα δεν αποθηκεύεται μετά από ακύρωση');
@@ -90,8 +90,8 @@ test('διαθεσιμότητα, λίστα μηχανών και επίπεδ�
   const cloud = new FakeEngine('elevenlabs', { segments: [] }, { available: false, reason: ERROR_CODES.KEY_MISSING });
   const { service: s } = service([local, cloud]);
   assert.deepEqual(s.engineKinds, ['local', 'elevenlabs'], 'με τη σειρά που δόθηκαν');
-  assert.deepEqual(await s.checkAvailability('local', { ...options, localQualityPreset: 'fast' }), { available: true });
-  assert.equal(local.availabilityRequests[0].localQualityPreset, 'fast');
+  assert.deepEqual(await s.checkAvailability('local', { ...options, localQuality: 'fast' }), { available: true });
+  assert.equal(local.availabilityRequests[0].localQuality, 'fast');
   assert.deepEqual(await s.checkAvailability('elevenlabs'), { available: false, reason: ERROR_CODES.KEY_MISSING });
   assert.deepEqual(await s.describeQualityPresets('local'), presets);
   assert.equal(await s.describeQualityPresets('elevenlabs'), null, 'μηχανή χωρίς επίπεδα ποιότητας');

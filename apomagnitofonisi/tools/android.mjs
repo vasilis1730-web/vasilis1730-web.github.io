@@ -14,13 +14,15 @@
  *
  *   node tools/android.mjs version [--version-code N]
  *        → versionCode=… και versionName=… (για το $GITHUB_OUTPUT), κενό N = από την ώρα UTC
- *   node tools/android.mjs inspect --version-code N
- *        → έλεγχος του ανυπόγραφου APK μετά το Gradle (test.yml)
+ *   node tools/android.mjs inspect [--version-code N]
+ *        → έλεγχος του ανυπόγραφου APK μετά το Gradle (test.yml), με N και έλεγχος του versionCode
  *   node tools/android.mjs release --keystore <αρχείο> --out <φάκελος> --version-code N
  *        → υπογραφή APK/AAB με το upload key, επαλήθευση, σύνοψη (android.yml)
  *
  * Κάθε εντολή δέχεται μόνο τις δικές της παραμέτρους (COMMAND_FLAGS): μια
- * παράμετρος άλλης εντολής απορρίπτεται, δεν αγνοείται σιωπηλά.
+ * παράμετρος άλλης εντολής απορρίπτεται, δεν αγνοείται σιωπηλά. Το
+ * --version-code ελέγχεται μία φορά, στο parseArgs (parseVersionCode), για όλες
+ * τις εντολές, πριν γίνει οποιαδήποτε δουλειά.
  *
  * Οι κωδικοί του keystore διαβάζονται ΜΟΝΟ από το περιβάλλον
  * (ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_PASSWORD, ANDROID_KEY_ALIAS) και
@@ -34,8 +36,8 @@ import { fileURLToPath } from 'node:url';
 import { ROOT } from './paths.mjs';
 import { ANDROID_DIR, ANDROID_APPS, readTwaManifest, gradleOutputsOf } from './android/project.mjs';
 import { ASSET_LINK_RELATIONS } from './android/asset-links.mjs';
-import { versionFor } from './android/play-version.mjs';
-import { parseBadging, parseResources, parseApksignerCerts, parseKeytoolCerts, checkApk } from './android/apk-inspection.mjs';
+import { versionFor, parseVersionCode } from './android/play-version.mjs';
+import { parseBadging, parseResources, parseApksignerCerts, parseKeytoolCerts, findApkProblems } from './android/apk-inspection.mjs';
 
 /* ---------- Εργαλεία του Android SDK και του JDK ---------- */
 
@@ -79,7 +81,7 @@ export function inspectApk({ apk, app, root = ROOT, buildToolsDir = findBuildToo
   const badging = parseBadging(run(aapt2, ['dump', 'badging', apk]));
   const resources = parseResources(run(aapt2, ['dump', 'resources', apk]));
   const manifestTree = run(aapt2, ['dump', 'xmltree', '--file', 'AndroidManifest.xml', apk]);
-  return { twa, badging, problems: checkApk({ app, twa, badging, resources, manifestTree, versionCode }) };
+  return { twa, badging, problems: findApkProblems({ app, twa, badging, resources, manifestTree, versionCode }) };
 }
 
 function sha256(file) {
@@ -88,35 +90,55 @@ function sha256(file) {
 
 /* ---------- Εντολές ---------- */
 
-/** Οι παράμετροι που δέχεται κάθε εντολή και το όνομα του πεδίου τους στο αποτέλεσμα του parseArgs. */
+/**
+ * Μία παράμετρος μιας εντολής: το πεδίο της στο αποτέλεσμα του parseArgs, πώς
+ * διαβάζεται η τιμή της και αν είναι υποχρεωτική.
+ * @typedef {{ key: string, parse?: (raw: string) => unknown, required?: boolean }} FlagSpec
+ */
+const flag = (key, { parse, required = false } = {}) => Object.freeze({ key, parse, required });
+
+/** Οι παράμετροι που δέχεται κάθε εντολή. */
 export const COMMAND_FLAGS = Object.freeze({
-  version: Object.freeze({ '--version-code': 'versionCode' }),
-  inspect: Object.freeze({ '--version-code': 'versionCode' }),
-  release: Object.freeze({ '--keystore': 'keystore', '--out': 'out', '--version-code': 'versionCode' }),
+  version: Object.freeze({ '--version-code': flag('versionCode', { parse: parseVersionCode }) }),
+  inspect: Object.freeze({ '--version-code': flag('versionCode', { parse: parseVersionCode }) }),
+  release: Object.freeze({
+    '--keystore': flag('keystore', { required: true }),
+    '--out': flag('out'),
+    '--version-code': flag('versionCode', { parse: parseVersionCode, required: true }),
+  }),
 });
 
 export const USAGE = 'χρήση: node tools/android.mjs version [--version-code N] | inspect [--version-code N] | release --keystore <αρχείο> --out <φάκελος> --version-code N';
 
 /**
- * Οι παράμετροι της γραμμής εντολών, ελεγμένες ανά εντολή. Κωδικοί δεν
- * δέχεται ποτέ από εδώ (μόνο από το περιβάλλον).
+ * Οι παράμετροι της γραμμής εντολών, ελεγμένες ανά εντολή: άγνωστη ή ξένη
+ * παράμετρος, τιμή που λείπει, διπλή παράμετρος, άκυρο --version-code και
+ * υποχρεωτική παράμετρος που λείπει απορρίπτονται εδώ. Κενό --version-code
+ * σημαίνει «δεν δόθηκε» (στο version: από την ώρα). Κωδικούς δεν δέχεται ποτέ
+ * από εδώ (μόνο από το περιβάλλον).
  * @param {string[]} argv
- * @returns {{ command: 'version'|'inspect'|'release', keystore?: string, out?: string, versionCode?: string }}
+ * @returns {{ command: 'version'|'inspect'|'release', keystore?: string, out?: string, versionCode?: number }}
  */
 export function parseArgs(argv) {
   const [command, ...rest] = argv;
   const flags = Object.hasOwn(COMMAND_FLAGS, command ?? '') ? COMMAND_FLAGS[command] : null;
   if (!flags) throw new Error(`άγνωστη εντολή «${command ?? ''}». ${USAGE}`);
   const args = { command };
+  const seen = new Set();
   for (let i = 0; i < rest.length; i += 2) {
-    const flag = rest[i];
-    if (!Object.hasOwn(flags, flag)) {
-      throw new Error(`η παράμετρος ${flag} δεν ισχύει για την εντολή ${command} (δέχεται: ${Object.keys(flags).join(', ')})`);
+    const name = rest[i];
+    if (!Object.hasOwn(flags, name)) {
+      throw new Error(`η παράμετρος ${name} δεν ισχύει για την εντολή ${command} (δέχεται: ${Object.keys(flags).join(', ')})`);
     }
-    if (i + 1 >= rest.length) throw new Error(`λείπει η τιμή της ${flag}`);
-    const key = flags[flag];
-    if (Object.hasOwn(args, key)) throw new Error(`η ${flag} δόθηκε δύο φορές`);
-    args[key] = rest[i + 1];
+    if (i + 1 >= rest.length) throw new Error(`λείπει η τιμή της ${name}`);
+    if (seen.has(name)) throw new Error(`η ${name} δόθηκε δύο φορές`);
+    seen.add(name);
+    const { key, parse } = flags[name];
+    const value = parse ? parse(rest[i + 1]) : rest[i + 1];
+    if (value !== undefined && value !== '') args[key] = value;
+  }
+  for (const [name, { key, required }] of Object.entries(flags)) {
+    if (required && args[key] === undefined) throw new Error(`η εντολή ${command} θέλει ${name}. ${USAGE}`);
   }
   return args;
 }
@@ -133,7 +155,7 @@ function commandInspect(args, root = ROOT) {
   for (const app of ANDROID_APPS) {
     const { apk } = gradleOutputsOf(app, root);
     if (!fs.existsSync(apk)) { problems.push(`${app}: λείπει το ${path.relative(root, apk)} (τρέξε πρώτα ./gradlew assembleRelease)`); continue; }
-    const result = inspectApk({ apk, app, root, buildToolsDir, versionCode: args.versionCode || undefined });
+    const result = inspectApk({ apk, app, root, buildToolsDir, versionCode: args.versionCode });
     problems.push(...result.problems);
     const b = result.badging;
     console.log(`${result.problems.length ? '✖' : '✓'} ${app}: ${b.package} ${b.versionCode} (${b.versionName}), minSdk ${b.minSdk}, targetSdk ${b.targetSdk}`);
@@ -235,9 +257,9 @@ export function releaseSummary({ rows, versionCode, buildToolsDir, warnings, pro
 async function commandRelease(args, root = ROOT) {
   const keystore = args.keystore;
   const out = path.resolve(args.out || 'android-release');
+  // Το parseArgs έχει ήδη ελέγξει ότι δόθηκαν και ότι το versionCode είναι έγκυρο.
   const versionCode = args.versionCode;
-  if (!keystore || !fs.existsSync(keystore) || !fs.statSync(keystore).size) throw new Error('λείπει ή είναι άδειο το keystore (--keystore)');
-  if (!versionCode) throw new Error('λείπει το --version-code');
+  if (!fs.existsSync(keystore) || !fs.statSync(keystore).size) throw new Error('λείπει ή είναι άδειο το keystore (--keystore)');
   const alias = process.env.ANDROID_KEY_ALIAS;
   if (!alias || !process.env.ANDROID_KEYSTORE_PASSWORD) throw new Error('λείπουν τα ANDROID_KEY_ALIAS ή ANDROID_KEYSTORE_PASSWORD');
   // Κενός κωδικός κλειδιού = ίδιος με του keystore (όπως στα keystores PKCS12).

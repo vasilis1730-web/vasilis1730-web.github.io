@@ -12,6 +12,7 @@
  */
 import { AppError, ERROR_CODES } from '../../application/errors.js';
 import { findLanguage } from '../../config/languages.js';
+import { TOKEN_KINDS } from '../../domain/words-to-segments.js';
 
 /** Χωρίς ετικέτες από τη διεπαφή, το συμβάν μένει με το όνομα του ElevenLabs. */
 const RAW_EVENT_LABELS = Object.freeze({ byEvent: Object.freeze({}), unknown: '?' });
@@ -34,7 +35,7 @@ export function readScribeResponse(body, { audioEventLabels = RAW_EVENT_LABELS }
     const isEvent = word.type === 'audio_event';
     const text = isEvent ? `[${audioEventName(word.text, audioEventLabels)}]` : String(word.text ?? '').trim();
     if (!text) continue;
-    tokens.push({ text, start, end: Number.isFinite(end) ? end : start, speakerKey: word.speaker_id ?? null, kind: isEvent ? 'event' : 'word' });
+    tokens.push({ text, start, end: Number.isFinite(end) ? end : start, speakerKey: word.speaker_id ?? null, kind: isEvent ? TOKEN_KINDS.EVENT : TOKEN_KINDS.WORD });
   }
   const language = findLanguage(body && body.language_code);
   const duration = Number(body && body.audio_duration_secs);
@@ -42,12 +43,13 @@ export function readScribeResponse(body, { audioEventLabels = RAW_EVENT_LABELS }
 }
 
 /**
- * Σφάλμα HTTP του ElevenLabs (οποιουδήποτε endpoint) ως AppError.
+ * Σφάλμα HTTP του ElevenLabs (οποιουδήποτε endpoint) ως AppError. Ίδιο μοτίβο
+ * ονόματος με το appErrorFromAnthropicError (API-022).
  * @param {number} status
  * @param {string} bodyText
  * @returns {AppError}
  */
-export function elevenLabsErrorFor(status, bodyText) {
+export function appErrorFromElevenLabsResponse(status, bodyText) {
   const detail = parseDetail(bodyText);
   const details = { status, providerStatus: detail.status, providerMessage: detail.message };
   const error = code => new AppError(code, `ElevenLabs ${status}: ${detail.message || detail.status || ''}`.trim(), { details });

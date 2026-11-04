@@ -14,7 +14,7 @@ import { explicitLanguageCode } from '../../config/languages.js';
 import { ELEVENLABS_API } from '../../config/endpoints.js';
 import { ENGINE_KINDS } from '../../domain/transcript.js';
 import { groupTokensIntoSegments } from '../../domain/words-to-segments.js';
-import { readScribeResponse, elevenLabsErrorFor } from './elevenlabs-response.js';
+import { readScribeResponse, appErrorFromElevenLabsResponse } from './elevenlabs-response.js';
 
 const COMPACT_AUDIO_ABOVE_BYTES = 25 * 1024 * 1024;
 
@@ -73,7 +73,7 @@ export class ElevenLabsEngine {
       onUploadProgress: (loaded, total) => onProgress?.({ stage: PROGRESS_STAGES.UPLOADING, fraction: clampFraction(loaded / total), detail: { loadedBytes: loaded, totalBytes: total } }),
       onUploadComplete: () => onProgress?.({ stage: PROGRESS_STAGES.TRANSCRIBING }),
     });
-    if (response.status < 200 || response.status >= 300) throw elevenLabsErrorFor(response.status, response.bodyText);
+    if (response.status < 200 || response.status >= 300) throw appErrorFromElevenLabsResponse(response.status, response.bodyText);
 
     let body;
     try {
@@ -86,7 +86,7 @@ export class ElevenLabsEngine {
       segments: groupTokensIntoSegments(tokens).map(s => (options.diarize ? s : { ...s, speakerKey: null })),
       languageCode: detected,
       durationSec,
-      model: ELEVENLABS_API.speechToTextModelId,
+      modelId: ELEVENLABS_API.speechToTextModelId,
     };
   }
 

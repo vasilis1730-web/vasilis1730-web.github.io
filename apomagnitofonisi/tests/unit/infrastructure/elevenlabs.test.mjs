@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ElevenLabsEngine } from '../../../src/infrastructure/elevenlabs/elevenlabs-engine.js';
-import { readScribeResponse, elevenLabsErrorFor } from '../../../src/infrastructure/elevenlabs/elevenlabs-response.js';
+import { readScribeResponse, appErrorFromElevenLabsResponse } from '../../../src/infrastructure/elevenlabs/elevenlabs-response.js';
 import { XhrUploader } from '../../../src/infrastructure/http/xhr-uploader.js';
 import { ElevenLabsKeyVerifier } from '../../../src/infrastructure/elevenlabs/elevenlabs-key-verifier.js';
 import { AppError, ERROR_CODES } from '../../../src/application/errors.js';
-import { KEY_PROVIDERS } from '../../../src/application/api-key-service.js';
+import { KEY_PROVIDERS } from '../../../src/application/key-providers.js';
 import { ENGINE_KINDS } from '../../../src/domain/transcript.js';
 
 const scribeBody = {
@@ -53,18 +53,18 @@ test('απάντηση Scribe → tokens: χωρίς κενά, συμβάντα 
 
 test('σφάλματα HTTP → κωδικοί', () => {
   const body = (status, message) => JSON.stringify({ detail: { status, message } });
-  assert.equal(elevenLabsErrorFor(401, body('invalid_api_key', 'Invalid API key')).code, ERROR_CODES.KEY_INVALID);
-  assert.equal(elevenLabsErrorFor(401, body('quota_exceeded', 'no credits')).code, ERROR_CODES.QUOTA_EXCEEDED);
-  assert.equal(elevenLabsErrorFor(402, '').code, ERROR_CODES.QUOTA_EXCEEDED);
-  assert.equal(elevenLabsErrorFor(403, '').code, ERROR_CODES.KEY_INVALID);
-  assert.equal(elevenLabsErrorFor(413, '').code, ERROR_CODES.FILE_TOO_LARGE);
-  assert.equal(elevenLabsErrorFor(429, body('too_many_concurrent_requests', 'x')).code, ERROR_CODES.RATE_LIMITED);
-  const invalid = elevenLabsErrorFor(422, JSON.stringify({ detail: [{ msg: 'file is required' }] }));
+  assert.equal(appErrorFromElevenLabsResponse(401, body('invalid_api_key', 'Invalid API key')).code, ERROR_CODES.KEY_INVALID);
+  assert.equal(appErrorFromElevenLabsResponse(401, body('quota_exceeded', 'no credits')).code, ERROR_CODES.QUOTA_EXCEEDED);
+  assert.equal(appErrorFromElevenLabsResponse(402, '').code, ERROR_CODES.QUOTA_EXCEEDED);
+  assert.equal(appErrorFromElevenLabsResponse(403, '').code, ERROR_CODES.KEY_INVALID);
+  assert.equal(appErrorFromElevenLabsResponse(413, '').code, ERROR_CODES.FILE_TOO_LARGE);
+  assert.equal(appErrorFromElevenLabsResponse(429, body('too_many_concurrent_requests', 'x')).code, ERROR_CODES.RATE_LIMITED);
+  const invalid = appErrorFromElevenLabsResponse(422, JSON.stringify({ detail: [{ msg: 'file is required' }] }));
   assert.equal(invalid.code, ERROR_CODES.PROVIDER_REJECTED, 'το απέρριψε ο πάροχος, όχι η φόρμα της εφαρμογής');
   assert.equal(invalid.details.providerMessage, 'file is required');
-  assert.equal(elevenLabsErrorFor(400, body('invalid_language', 'bad language')).code, ERROR_CODES.PROVIDER_REJECTED);
-  assert.equal(elevenLabsErrorFor(503, 'oops').code, ERROR_CODES.OVERLOADED);
-  assert.equal(elevenLabsErrorFor(500, '').code, ERROR_CODES.UNKNOWN);
+  assert.equal(appErrorFromElevenLabsResponse(400, body('invalid_language', 'bad language')).code, ERROR_CODES.PROVIDER_REJECTED);
+  assert.equal(appErrorFromElevenLabsResponse(503, 'oops').code, ERROR_CODES.OVERLOADED);
+  assert.equal(appErrorFromElevenLabsResponse(500, '').code, ERROR_CODES.UNKNOWN);
 });
 
 test('μεταγραφή: πεδία του αιτήματος, πρόοδος και τμήματα ανά ομιλητή', async () => {

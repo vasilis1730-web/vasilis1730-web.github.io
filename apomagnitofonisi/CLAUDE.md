@@ -50,11 +50,27 @@ npm run test:browser   # πραγματικός Chromium πάνω στο dist μ
   χρειάζονται, και μόνο μέσω του `src/infrastructure/vendor-loader.js`.
 - **Στρώματα (Clean Architecture)**: `domain` → μόνο `domain`, `application` →
   `application`/`domain`/`config`, `infrastructure` → `infrastructure`/`application`/`domain`/`config`,
-  `ui` → `ui`/`application`/`domain`/`config`, `config` → τίποτα. Μόνο το
-  `src/main.js` συνδέει adapters (και μόνο εκεί `new Worker(`). Μετρούν και οι
+  `ui` → `ui`/`application`/`domain`/`config`, `config` → τίποτα. Μετρούν και οι
   τύποι JSDoc `import('…')`: μια προβολή δεν γράφει τύπο από το `infrastructure/`,
-  ο τύπος μπαίνει ως θύρα στο `src/application/ports.js`. Το ελέγχει το
-  `tests/infra/architecture.test.mjs` (κανόνες στο `tools/import-graph.mjs`).
+  ο τύπος μπαίνει ως θύρα στο `src/application/ports.js`. Επιπλέον:
+  - δύο composition roots, που κανείς δεν εισάγει: το `src/main.js` (σελίδα, και
+    μόνο εκεί `new Worker(`) και το `src/infrastructure/whisper/whisper-worker.js`
+    (worker). Το `src/main.js` ξεκινά τον worker με `new URL('…', import.meta.url)`,
+    που μετρά ως εξάρτηση αρχείου και πρέπει να υπάρχει,
+  - κανένας κύκλος ανάμεσα σε modules, ούτε μέσω τύπων JSDoc (κοινές σταθερές σε
+    δικό τους module, όπως `key-providers.js` και `export-formats.js`),
+  - `domain` και `application` χωρίς globals του browser (`window`, `document`,
+    `fetch`, `localStorage` κ.λπ.): ό,τι χρειάζονται τους δίνεται από θύρα,
+  - τα `ui/components` δεν εξαρτώνται από `ui/views`,
+  - κάθε πάροχος του `infrastructure` (`whisper`, `elevenlabs`, `anthropic`,
+    `media`, `export`) βλέπει μόνο τον εαυτό του και τα κοινά (`platform`,
+    `http`, `storage`, `vendor-loader.js`), και τα κοινά κανέναν πάροχο. Νέος
+    φάκελος δηλώνεται ρητά στο `tools/import-graph.mjs`,
+  - το `infrastructure` παίρνει από την `application` μόνο συμβόλαια και σταθερές
+    (`APPLICATION_CONTRACTS`: `ports.js`, `errors.js`, `progress.js`, …), ποτέ υπηρεσίες,
+  - τα `tools/` διαβάζουν από το `src/` μόνο το `src/config/`.
+
+  Τα ελέγχει το `tests/infra/architecture.test.mjs` (κανόνες στο `tools/import-graph.mjs`).
 - **COOP/COEP**: η σελίδα είναι cross-origin isolated (πολυνηματικό WASM). Κάθε
   πόρος τρίτου φορτώνεται με CORS.
 - **Κλειδιά**: τα κλειδιά των χρηστών μένουν στη συσκευή τους. Κανένα κλειδί στο

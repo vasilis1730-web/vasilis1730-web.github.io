@@ -44,6 +44,21 @@ export class TranscriptEditor {
     return { transcript: updated, speakerId: created.speakerId };
   }
 
+  /**
+   * Νέος ομιλητής και απόδοσή του σε ένα τμήμα, ως ΜΙΑ αλλαγή με μία
+   * αποθήκευση (OO-013): δεν μένει ποτέ αποθηκευμένος ομιλητής χωρίς το τμήμα του.
+   * @returns {Promise<{ transcript: import('../domain/transcript.js').Transcript, speakerId: string }>}
+   */
+  async addSpeakerToSegment(transcript, segmentId, label) {
+    let speakerId;
+    const updated = await this.#apply(now => {
+      const created = addSpeaker(transcript, label, now);
+      speakerId = created.speakerId;
+      return assignSpeaker(created.transcript, segmentId, created.speakerId, now);
+    });
+    return { transcript: updated, speakerId };
+  }
+
   assignSpeaker(transcript, segmentId, speakerId) {
     return this.#apply(now => assignSpeaker(transcript, segmentId, speakerId, now));
   }

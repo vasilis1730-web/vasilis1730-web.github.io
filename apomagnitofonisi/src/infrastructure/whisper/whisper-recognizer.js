@@ -41,7 +41,7 @@ export class WhisperRecognizer {
 
   /**
    * @param {any} transformers  το module του Transformers.js
-   * @param {{ repo: string, device: string, dtype: Record<string, string> }} model
+   * @param {import('./worker-protocol.js').SpeechModelSpec} model
    * @param {(event: any) => void} progressCallback
    */
   static async load(transformers, model, progressCallback) {

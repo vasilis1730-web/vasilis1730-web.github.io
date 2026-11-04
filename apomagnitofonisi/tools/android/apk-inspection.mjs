@@ -73,7 +73,7 @@ export function parseKeytoolCerts(text) {
  * μέθοδος και αρχεία με το shareTarget του twa-manifest.json, meta-data και
  * intent filter SEND για ήχο και βίντεο. Επιστρέφει τη λίστα προβλημάτων.
  */
-export function checkShareTarget({ app, twa, resources, manifestTree }) {
+export function findShareTargetProblems({ app, twa, resources, manifestTree }) {
   const problems = [];
   const expect = (ok, message) => { if (!ok) problems.push(`${app}: ${message}`); };
   const wanted = twa.shareTarget;
@@ -106,7 +106,7 @@ export function checkShareTarget({ app, twa, resources, manifestTree }) {
  * διαβασμένη (parseBadging, parseResources, aapt2 dump xmltree) και επιστρέφει
  * τη λίστα προβλημάτων (κενή = εντάξει).
  */
-export function checkApk({ app, twa, badging, resources, manifestTree, versionCode }) {
+export function findApkProblems({ app, twa, badging, resources, manifestTree, versionCode }) {
   const problems = [];
   const expect = (ok, message) => { if (!ok) problems.push(`${app}: ${message}`); };
   const origin = `https://${twa.host}`;
@@ -140,6 +140,6 @@ export function checkApk({ app, twa, badging, resources, manifestTree, versionCo
   expect(!/:(path|pathPattern|pathAdvancedPattern|pathSuffix)\(/.test(manifestTree), 'intent filter με διαδρομή εκτός pathPrefix');
   expect(/:autoVerify\([^)]*\)=true/.test(manifestTree), 'το intent filter δεν έχει autoVerify');
 
-  problems.push(...checkShareTarget({ app, twa, resources, manifestTree }));
+  problems.push(...findShareTargetProblems({ app, twa, resources, manifestTree }));
   return problems;
 }

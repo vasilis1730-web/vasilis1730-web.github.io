@@ -29,7 +29,7 @@ export async function createAnthropicClient(loadSdk, apiKey) {
  * @param {any} sdk  το module του SDK, για τις κλάσεις σφαλμάτων
  * @returns {AppError}
  */
-export function anthropicErrorToAppError(error, sdk) {
+export function appErrorFromAnthropicError(error, sdk) {
   if (error instanceof AppError) return error;
   const providerMessage = error && error.error && error.error.error ? error.error.error.message : (error && error.message) || null;
   const make = code => new AppError(code, `Anthropic: ${providerMessage || code}`, { cause: error, details: { status: error && error.status, providerMessage } });

@@ -14,7 +14,9 @@
  * @property {number} start
  * @property {number} end
  * @property {string|null} speakerKey  το αναγνωριστικό ομιλητή της μηχανής
- * @property {'word'|'event'} kind
+ * @property {TokenKind} kind
+ *
+ * @typedef {typeof TOKEN_KINDS[keyof typeof TOKEN_KINDS]} TokenKind
  *
  * @typedef {Object} RecognizedSegment
  * @property {number} start
@@ -25,12 +27,17 @@
  */
 import { endsSentence } from './text-normalize.js';
 
+/** Τα είδη των λέξεων μιας μηχανής (API-004): λέξη ή ηχητικό συμβάν (γέλια, χειροκροτήματα). */
+export const TOKEN_KINDS = Object.freeze({
+  WORD: 'word',
+  EVENT: 'event',
+});
+
 export const DEFAULT_GROUPING_RULES = Object.freeze({
   maxPauseSec: 1.2,
   maxSegmentSec: 30,
   preferBreakAfterSec: 15,
 });
-
 
 /**
  * @param {RecognizedToken[]} tokens
@@ -53,9 +60,9 @@ export function groupTokensIntoSegments(tokens, rules = {}) {
       current = null;
     }
     if (!current) {
-      current = { start: token.start, end: token.end, speakerKey: token.kind === 'event' ? null : token.speakerKey ?? null, words: [] };
+      current = { start: token.start, end: token.end, speakerKey: token.kind === TOKEN_KINDS.EVENT ? null : token.speakerKey ?? null, words: [] };
     }
-    if (current.speakerKey == null && token.kind !== 'event') current.speakerKey = token.speakerKey ?? null;
+    if (current.speakerKey == null && token.kind !== TOKEN_KINDS.EVENT) current.speakerKey = token.speakerKey ?? null;
     current.words.push({ text: String(token.text).trim(), start: token.start, end: Math.max(token.start, token.end) });
     current.end = Math.max(current.end, token.end);
   }
@@ -64,7 +71,7 @@ export function groupTokensIntoSegments(tokens, rules = {}) {
 }
 
 function startsNewSegment(current, token, rules) {
-  const isEvent = token.kind === 'event';
+  const isEvent = token.kind === TOKEN_KINDS.EVENT;
   const speakerChanged = !isEvent && current.speakerKey != null && (token.speakerKey ?? null) !== current.speakerKey;
   const pause = token.start - current.end;
   const tooLong = token.end - current.start > rules.maxSegmentSec;

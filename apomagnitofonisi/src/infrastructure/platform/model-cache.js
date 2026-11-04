@@ -5,7 +5,7 @@
  */
 export const MODEL_CACHE_NAMES = Object.freeze(['transformers-cache']);
 
-export class ModelCache {
+export class BrowserModelCache {
   #caches;
 
   /** @param {{ caches: CacheStorage|undefined }} deps */

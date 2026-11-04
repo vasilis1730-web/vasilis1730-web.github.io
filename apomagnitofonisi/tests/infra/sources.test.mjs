@@ -5,7 +5,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { PUBLIC_DIR } from '../../tools/build-dist.mjs';
 import { cspOf } from '../../tools/headers.mjs';
-import { findForbiddenCharacters, findSecrets, checkHtml, checkVendorModule, VENDOR_MODULE } from '../../tools/source-checks.mjs';
+import { findForbiddenCharacters, findSecrets, findHtmlProblems, findVendorModuleProblems, VENDOR_MODULE } from '../../tools/source-checks.mjs';
 import { ROOT } from '../../tools/paths.mjs';
 import { read, exists, skipWhileAppPending, repositoryFiles, TEXT_FILE } from './helpers.mjs';
 
@@ -35,7 +35,7 @@ test('οι σελίδες HTML δεν έχουν inline script, on…=, style= �
   const csp = cspOf(read(`${PUBLIC_DIR}/_headers`));
   const pages = repositoryFiles().filter(f => /^[^/]+\.html$/.test(f));
   assert.deepEqual(pages.sort(), ['404.html', 'index.html', 'privacy.html']);
-  for (const file of pages) assert.deepEqual(checkHtml({ file, text: read(file), csp }), [], file);
+  for (const file of pages) assert.deepEqual(findHtmlProblems({ file, text: read(file), csp }), [], file);
   assert.match(read('privacy.html'), /id="delete"/, 'η ενότητα διαγραφής που ζητά το Google Play (…/privacy#delete)');
 });
 
@@ -43,7 +43,7 @@ test('οι βιβλιοθήκες τρίτων ζουν μόνο στο src/conf
   if (skipWhileAppPending(t)) return;
   assert.ok(exists(VENDOR_MODULE), `${VENDOR_MODULE}: η μοναδική πηγή εκδόσεων των βιβλιοθηκών`);
   const csp = cspOf(read(`${PUBLIC_DIR}/_headers`));
-  assert.deepEqual(checkVendorModule({ text: read(VENDOR_MODULE), csp }), []);
+  assert.deepEqual(findVendorModuleProblems({ text: read(VENDOR_MODULE), csp }), []);
 });
 
 test('το web manifest είναι έγκυρο, με σχετικές διαδρομές, εικονίδια που υπάρχουν και share target για ήχο και βίντεο', t => {

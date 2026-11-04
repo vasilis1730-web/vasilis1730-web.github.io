@@ -32,16 +32,16 @@ export class FallbackMediaReader {
     }
   }
 
-  async *readMono16k(media, options) {
+  async *readMonoPcm(media, options) {
     let yielded = false;
     try {
-      for await (const chunk of this.#primary.readMono16k(media, options)) {
+      for await (const chunk of this.#primary.readMonoPcm(media, options)) {
         yielded = true;
         yield chunk;
       }
     } catch (error) {
       if (yielded || !isUnsupported(error)) throw error;
-      yield* this.#fallback.readMono16k(media, options);
+      yield* this.#fallback.readMonoPcm(media, options);
     }
   }
 

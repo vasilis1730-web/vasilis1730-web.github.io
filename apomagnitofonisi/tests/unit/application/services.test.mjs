@@ -5,8 +5,10 @@ import { EXPORT_FORMATS, SHARE_FORMAT_PREFERENCE } from '../../../src/applicatio
 import { LibraryService } from '../../../src/application/library-service.js';
 import { TranscriptEditor } from '../../../src/application/transcript-editor.js';
 import { SettingsService, DEFAULT_SETTINGS } from '../../../src/application/settings-service.js';
-import { ApiKeyService, KEY_PROVIDERS } from '../../../src/application/api-key-service.js';
-import { DataErasureService, ERASE_TARGETS } from '../../../src/application/data-erasure-service.js';
+import { ApiKeyService } from '../../../src/application/api-key-service.js';
+import { KEY_PROVIDERS, KEY_RETENTIONS } from '../../../src/application/key-providers.js';
+import { DataErasureService } from '../../../src/application/data-erasure-service.js';
+import { ERASE_TARGETS } from '../../../src/application/erase-targets.js';
 import { AppError, ERROR_CODES, INPUT_ISSUES, invalidInput, isAppError, toAppError, isCancellation, throwIfAborted } from '../../../src/application/errors.js';
 import { createTranscript, addSummary, TranscriptRuleError, TRANSCRIPT_RULES } from '../../../src/domain/transcript.js';
 import { serializeTranscript } from '../../../src/domain/transcript-codec.js';
@@ -54,7 +56,7 @@ test('εξαγωγή: όνομα αρχείου με κενά, άγνωστη μ
 test('εξαγωγή: κείμενο για το πρόχειρο, και μορφή κοινής χρήσης χωρίς να φτιαχτεί το αρχείο', () => {
   const rendered = [];
   const service = exportService({ rendered });
-  assert.equal(service.clipboardText(base), 'κείμενο t1');
+  assert.equal(service.exportClipboardText(base), 'κείμενο t1');
   rendered.length = 0;
   const asked = [];
   const share = accepted => service.shareFormatFor(base, file => { asked.push(file); return accepted.includes(file.mimeType); });
@@ -108,22 +110,37 @@ test('διορθώσεις: κάθε αλλαγή αποθηκεύεται, μό
   assert.deepEqual((await editor.removeSummary(withSummary, 's1')).summaries, []);
 });
 
+test('νέος ομιλητής σε τμήμα: μία αλλαγή, μία αποθήκευση (OO-013)', async () => {
+  const repository = new MemoryRepository();
+  const editor = new TranscriptEditor({ repository, clock: fixedClock('2026-11-05T00:00:00.000Z') });
+  const { transcript, speakerId } = await editor.addSpeakerToSegment(base, 'seg-1', 'Γραμματέας');
+  assert.equal(speakerId, 'S2');
+  assert.equal(transcript.speakers.at(-1).label, 'Γραμματέας');
+  assert.equal(transcript.segments[0].speakerId, 'S2');
+  assert.equal(repository.saves, 1, 'μία αποθήκευση για όλη την αλλαγή');
+  assert.deepEqual((await repository.findById('t1')).segments[0].speakerId, 'S2');
+  await assert.rejects(editor.addSpeakerToSegment(base, 'seg-9', 'Χ'), e => e instanceof TranscriptRuleError && e.rule === TRANSCRIPT_RULES.UNKNOWN_SEGMENT);
+  await assert.rejects(editor.addSpeakerToSegment(base, 'seg-1', ' '), isInputIssue(INPUT_ISSUES.EMPTY_SPEAKER_NAME));
+  assert.equal(repository.saves, 1, 'καμία αποθήκευση όταν απορρίπτεται, ούτε μισή');
+});
+
 test('ρυθμίσεις: προεπιλογές, απόρριψη άκυρων τιμών και παλιών αποθηκευμένων', () => {
-  const store = new MemorySettingsStore({ engineKind: 'elevenlabs', languageCode: 'zz', removeAnoTeleia: 'yes', localQualityPreset: 'turbo', stale: 1 });
+  const store = new MemorySettingsStore({ engineKind: 'elevenlabs', languageCode: 'zz', removeAnoTeleia: 'yes', localQuality: 'turbo', stale: 1 });
   const settings = new SettingsService({ store });
   assert.equal(settings.current.engineKind, 'elevenlabs');
   assert.equal(settings.current.languageCode, DEFAULT_SETTINGS.languageCode);
   assert.equal(settings.current.removeAnoTeleia, true);
-  assert.equal(settings.current.localQualityPreset, 'auto');
+  assert.equal(settings.current.localQuality, 'auto');
   assert.equal('stale' in settings.current, false);
   assert.equal(settings.current.claudeModelId, 'claude-opus-5-5');
   assert.deepEqual(settings.current.diarizeByEngine, { local: false, elevenlabs: true });
-  settings.update({ expectedSpeakers: 3, diarizeByEngine: { local: true, elevenlabs: true }, localQualityPreset: 'accurate' });
+  settings.update({ expectedSpeakers: 3, diarizeByEngine: { local: true, elevenlabs: true }, localQuality: 'accurate' });
   assert.equal(store.value.expectedSpeakers, 3);
-  assert.equal(store.value.localQualityPreset, 'accurate');
+  assert.equal(store.value.localQuality, 'accurate');
   assert.throws(() => settings.update({ expectedSpeakers: 0 }), RangeError);
   assert.throws(() => settings.update({ claudeModelId: 'gpt-5' }), RangeError);
-  assert.throws(() => settings.update({ localQualityPreset: 'turbo' }), RangeError);
+  assert.throws(() => settings.update({ localQuality: 'turbo' }), RangeError);
+  assert.throws(() => settings.update({ localQualityPreset: 'fast' }), RangeError, 'το παλιό όνομα δεν γράφεται πια');
   assert.throws(() => settings.update({ diarizeByEngine: { local: true } }), RangeError, 'μία σημαία για κάθε μηχανή');
   assert.throws(() => settings.update({ whatever: 1 }), RangeError);
   assert.throws(() => settings.update({ engineKind: 'cloud', removeAnoTeleia: false }), RangeError);
@@ -134,6 +151,9 @@ test('ρυθμίσεις: προεπιλογές, απόρριψη άκυρων 
   assert.equal(store.value, null);
   assert.equal(settings.current.engineKind, 'local');
   assert.equal(settings.current.expectedSpeakers, null);
+  const legacy = new SettingsService({ store: new MemorySettingsStore({ localQualityPreset: 'balanced' }) });
+  assert.equal(legacy.current.localQuality, 'balanced', 'η παλιά αποθηκευμένη ρύθμιση διαβάζεται με το νέο όνομα');
+  assert.equal('localQualityPreset' in legacy.current, false);
 });
 
 test('κλειδιά: αποθήκευση, ένδειξη, έλεγχος, διατήρηση και μετάφραση σφαλμάτων', async () => {
@@ -146,8 +166,8 @@ test('κλειδιά: αποθήκευση, ένδειξη, έλεγχος, δι
   assert.equal(service.hasKey(KEY_PROVIDERS.ELEVENLABS), false);
   await assert.rejects(service.verify(KEY_PROVIDERS.ELEVENLABS), e => e.code === ERROR_CODES.KEY_MISSING);
   service.saveKey(KEY_PROVIDERS.ELEVENLABS, '  sk_abcdef1234  ');
-  assert.equal(service.keyHint(KEY_PROVIDERS.ELEVENLABS), '1234');
-  assert.equal(service.keyHint(KEY_PROVIDERS.ANTHROPIC), null);
+  assert.equal(service.getKeyHint(KEY_PROVIDERS.ELEVENLABS), '1234');
+  assert.equal(service.getKeyHint(KEY_PROVIDERS.ANTHROPIC), null);
   await service.verify(KEY_PROVIDERS.ELEVENLABS);
   assert.deepEqual(verified, ['sk_abcdef1234']);
   await assert.rejects(service.verify(KEY_PROVIDERS.ELEVENLABS, 'bad'), e => e.code === ERROR_CODES.KEY_INVALID);
@@ -155,42 +175,57 @@ test('κλειδιά: αποθήκευση, ένδειξη, έλεγχος, δι
   await assert.rejects(service.verify(KEY_PROVIDERS.ANTHROPIC, 'k'), RangeError, 'χωρίς έλεγχο για τον πάροχο: λάθος του κώδικα');
   assert.throws(() => service.saveKey(KEY_PROVIDERS.ELEVENLABS, 'a b'), isInputIssue(INPUT_ISSUES.KEY_WHITESPACE));
   assert.throws(() => service.saveKey(KEY_PROVIDERS.ELEVENLABS, '   '), isInputIssue(INPUT_ISSUES.EMPTY_KEY));
-  for (const call of [() => service.hasKey('openai'), () => service.keyHint('openai'), () => service.saveKey('openai', 'k'), () => service.removeKey('openai')]) {
+  for (const call of [() => service.hasKey('openai'), () => service.getKeyHint('openai'), () => service.saveKey('openai', 'k'), () => service.removeKey('openai')]) {
     assert.throws(call, RangeError, 'άγνωστος πάροχος');
   }
   await assert.rejects(service.verify('openai', 'k'), RangeError);
   assert.throws(() => new ApiKeyService({ keyStore, verifiers: [{ provider: 'openai', verify() {} }] }), RangeError);
-  assert.equal(service.keyRetention(), 'device');
-  service.setKeyRetention('session');
-  assert.equal(service.keyRetention(), 'session');
+  assert.equal(service.getKeyRetention(), KEY_RETENTIONS.DEVICE);
+  service.setKeyRetention(KEY_RETENTIONS.SESSION);
+  assert.equal(service.getKeyRetention(), KEY_RETENTIONS.SESSION);
   assert.throws(() => service.setKeyRetention('forever'), RangeError);
   service.removeKey(KEY_PROVIDERS.ELEVENLABS);
   assert.equal(service.hasKey(KEY_PROVIDERS.ELEVENLABS), false);
   service.saveKey(KEY_PROVIDERS.ANTHROPIC, 'sk-ant-1');
   service.clear();
   assert.equal(service.hasKey(KEY_PROVIDERS.ANTHROPIC), false);
-  assert.equal(service.keyRetention(), 'device', 'το clear σβήνει και την επιλογή διατήρησης');
+  assert.equal(service.getKeyRetention(), KEY_RETENTIONS.DEVICE, 'το clear σβήνει και την επιλογή διατήρησης');
 });
 
 test('διαγραφή όλων: κάθε στόχος σβήνεται ακόμη κι αν κάποιος αποτύχει, και το σφάλμα λέει ποιοι έμειναν', async () => {
   const erased = [];
   const target = (name, erase = () => { erased.push(name); }) => ({ name, erase });
-  const service = new DataErasureService({
-    targets: [
-      target(ERASE_TARGETS.TRANSCRIPTS, async () => { throw new DOMException('blocked', 'InvalidStateError'); }),
-      target(ERASE_TARGETS.KEYS),
-      target(ERASE_TARGETS.SETTINGS, () => { throw new Error('σύγχρονο σφάλμα'); }),
-      target(ERASE_TARGETS.MODELS, async () => { erased.push(ERASE_TARGETS.MODELS); }),
-    ],
-  });
-  assert.deepEqual(service.targetNames, ['transcripts', 'keys', 'settings', 'models']);
+  const failing = {
+    [ERASE_TARGETS.TRANSCRIPTS]: async () => { throw new DOMException('blocked', 'InvalidStateError'); },
+    [ERASE_TARGETS.SETTINGS]: () => { throw new Error('σύγχρονο σφάλμα'); },
+  };
+  const service = new DataErasureService({ targets: Object.values(ERASE_TARGETS).map(name => target(name, failing[name])) });
+  assert.deepEqual(service.targetNames, Object.values(ERASE_TARGETS));
   await assert.rejects(service.eraseAll(), e => e instanceof AppError && e.code === ERROR_CODES.ERASE_INCOMPLETE
     && JSON.stringify(e.details.failedTargets) === JSON.stringify([ERASE_TARGETS.TRANSCRIPTS, ERASE_TARGETS.SETTINGS]));
-  assert.deepEqual(erased, [ERASE_TARGETS.KEYS, ERASE_TARGETS.MODELS], 'οι υπόλοιποι σβήστηκαν κανονικά');
+  assert.deepEqual(erased, Object.values(ERASE_TARGETS).filter(name => !failing[name]), 'οι υπόλοιποι σβήστηκαν κανονικά');
 
-  const all = [];
-  await new DataErasureService({ targets: Object.values(ERASE_TARGETS).map(name => target(name, () => { all.push(name); })) }).eraseAll();
-  assert.deepEqual(all, Object.values(ERASE_TARGETS));
+  erased.length = 0;
+  await service.erase([ERASE_TARGETS.MODELS]);
+  assert.deepEqual(erased, [ERASE_TARGETS.MODELS], 'μόνο ό,τι ζητήθηκε');
+  await assert.rejects(service.erase(['όλα']), RangeError);
+});
+
+test('διαγραφή όλων: λείπει, περισσεύει ή επαναλαμβάνεται στόχος → λάθος σύνδεσης', () => {
+  const targets = Object.values(ERASE_TARGETS).map(name => ({ name, erase() {} }));
+  assert.throws(() => new DataErasureService({ targets: targets.slice(1) }), RangeError, 'ξεχασμένη αποθήκη');
+  assert.throws(() => new DataErasureService({ targets: [...targets, { name: 'cookies', erase() {} }] }), RangeError);
+  assert.throws(() => new DataErasureService({ targets: [...targets, targets[0]] }), RangeError);
+});
+
+test('διαγραφή: πρώτα σταματά ό,τι γράφει ακόμη, ακόμη κι αν το σταμάτημα αποτύχει', async () => {
+  const order = [];
+  const service = new DataErasureService({
+    beforeErase: [async () => { order.push('stop'); }, () => { throw new Error('δεν σταμάτησε'); }],
+    targets: Object.values(ERASE_TARGETS).map(name => ({ name, erase: () => { order.push(name); } })),
+  });
+  await service.eraseAll();
+  assert.deepEqual(order, ['stop', ...Object.values(ERASE_TARGETS)]);
 });
 
 test('σφάλματα: μετατροπή άγνωστων και ακυρώσεων, αιτίες εισόδου', () => {

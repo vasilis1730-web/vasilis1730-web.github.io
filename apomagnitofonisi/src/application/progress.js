@@ -1,12 +1,20 @@
 /**
  * Τα στάδια προόδου μιας μεταγραφής, κοινά για όλες τις μηχανές.
  *
- * @typedef {'reading'|'downloading-model'|'uploading'|'transcribing'|'diarizing'|'saving'} ProgressStage
+ * @typedef {typeof PROGRESS_STAGES[keyof typeof PROGRESS_STAGES]} ProgressStage
+ *
+ * @typedef {Object} ProgressDetail  οι μονάδες εξαρτώνται από το στάδιο (API-014):
+ *   byte (loadedBytes/totalBytes) στα DOWNLOADING_MODEL και UPLOADING,
+ *   δευτερόλεπτα ήχου (processedSec/totalSec) στο TRANSCRIBING.
+ * @property {number} [loadedBytes]
+ * @property {number} [totalBytes]
+ * @property {number} [processedSec]
+ * @property {number} [totalSec]
  *
  * @typedef {Object} ProgressUpdate
  * @property {ProgressStage} stage
  * @property {number} [fraction]  0 … 1, όταν είναι γνωστό
- * @property {{ loadedBytes?: number, totalBytes?: number, processedSec?: number, totalSec?: number }} [detail]
+ * @property {ProgressDetail} [detail]
  */
 export const PROGRESS_STAGES = Object.freeze({
   READING: 'reading',

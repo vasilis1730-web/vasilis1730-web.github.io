@@ -53,7 +53,7 @@ export class MemoryKeyStore {
   setKey(p, k) { this.keys.set(p, k); }
   removeKey(p) { this.keys.delete(p); }
   setKeyRetention(retention) { this.retention = retention; }
-  keyRetention() { return this.retention; }
+  getKeyRetention() { return this.retention; }
   clear() { this.keys.clear(); this.retention = 'device'; }
 }
 

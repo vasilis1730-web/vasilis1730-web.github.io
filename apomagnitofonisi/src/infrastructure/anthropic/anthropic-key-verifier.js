@@ -2,8 +2,8 @@
  * Έλεγχος κλειδιού Anthropic με τη λίστα μοντέλων (δωρεάν αίτημα).
  * Υλοποιεί τη θύρα KeyVerifier.
  */
-import { KEY_PROVIDERS } from '../../application/api-key-service.js';
-import { createAnthropicClient, anthropicErrorToAppError } from './anthropic-client.js';
+import { KEY_PROVIDERS } from '../../application/key-providers.js';
+import { createAnthropicClient, appErrorFromAnthropicError } from './anthropic-client.js';
 
 export class AnthropicKeyVerifier {
   provider = KEY_PROVIDERS.ANTHROPIC;
@@ -19,7 +19,7 @@ export class AnthropicKeyVerifier {
     try {
       await client.models.list({ limit: 1 });
     } catch (error) {
-      throw anthropicErrorToAppError(error, sdk);
+      throw appErrorFromAnthropicError(error, sdk);
     }
   }
 }

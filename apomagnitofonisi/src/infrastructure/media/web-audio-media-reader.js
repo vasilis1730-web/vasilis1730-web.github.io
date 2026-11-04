@@ -24,7 +24,7 @@ export class WebAudioMediaReader {
     return { durationSec: buffer.duration, hasAudio: buffer.length > 0, hasVideo: String(media.type || '').startsWith('video/'), audioCodec: null };
   }
 
-  async *readMono16k(media, { signal } = {}) {
+  async *readMonoPcm(media, { signal } = {}) {
     const buffer = await this.#decode(media);
     throwIfAborted(signal);
     const channels = Array.from({ length: buffer.numberOfChannels }, (_, c) => buffer.getChannelData(c));

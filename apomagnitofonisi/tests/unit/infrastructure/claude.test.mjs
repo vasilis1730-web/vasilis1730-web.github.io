@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ClaudeSummarizer, buildRequest } from '../../../src/infrastructure/anthropic/claude-summarizer.js';
+import { ClaudeSummarizer, buildMessagesRequest } from '../../../src/infrastructure/anthropic/claude-summarizer.js';
 import { AnthropicKeyVerifier } from '../../../src/infrastructure/anthropic/anthropic-key-verifier.js';
 import { ERROR_CODES } from '../../../src/application/errors.js';
-import { KEY_PROVIDERS } from '../../../src/application/api-key-service.js';
+import { KEY_PROVIDERS } from '../../../src/application/key-providers.js';
 
 /** Ψεύτικο SDK με τις ίδιες κλάσεις σφαλμάτων και το ίδιο σχήμα ροής με το @anthropic-ai/sdk. */
 function fakeSdk({ events = [], final, error } = {}) {
@@ -42,11 +42,11 @@ function fakeSdk({ events = [], final, error } = {}) {
   };
 }
 
-const request = { systemPrompt: 'Σύστημα', transcriptText: '<μεταγραφή>…</μεταγραφή>', instruction: 'Γράψε πρακτικά.', modelId: 'claude-opus-5-5' };
+const request = { systemPrompt: 'Σύστημα', transcriptText: '<μεταγραφή>…</μεταγραφή>', promptInstruction: 'Γράψε πρακτικά.', modelId: 'claude-opus-5-5' };
 const textEvent = text => ({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } });
 
 test('το αίτημα: μεταγραφή με cache_control, effort, εφεδρεία μόνο όπου υποστηρίζεται, χωρίς thinking/temperature', () => {
-  const opus = buildRequest(request);
+  const opus = buildMessagesRequest(request);
   assert.equal(opus.model, 'claude-opus-5-5');
   assert.equal(opus.max_tokens, 64000);
   assert.deepEqual(opus.output_config, { effort: 'medium' });
@@ -56,10 +56,10 @@ test('το αίτημα: μεταγραφή με cache_control, effort, εφεδ
   assert.deepEqual(opus.betas, ['server-side-fallback-2026-07-01']);
   assert.equal(opus.fallbacks, 'default');
   for (const field of ['thinking', 'temperature', 'top_p', 'top_k']) assert.equal(field in opus, false);
-  const haiku = buildRequest({ ...request, modelId: 'claude-haiku-5-5' });
+  const haiku = buildMessagesRequest({ ...request, modelId: 'claude-haiku-5-5' });
   assert.equal('fallbacks' in haiku, false);
   assert.equal('betas' in haiku, false);
-  assert.deepEqual(buildRequest({ ...request, modelId: 'claude-sonnet-5-5' }).betas, ['server-side-fallback-2026-07-01']);
+  assert.deepEqual(buildMessagesRequest({ ...request, modelId: 'claude-sonnet-5-5' }).betas, ['server-side-fallback-2026-07-01']);
 });
 
 test('ροή κειμένου, κλειδί στον browser και τελικό κείμενο', async () => {
@@ -114,6 +114,12 @@ test('άρνηση, χωρίς κλειδί και σφάλματα του SDK',
   const rejecting = { ...lowCredit.module, default: fakeSdk({ error: new lowCredit.module.BadRequestError(400, 'Your credit balance is too low') }).module.default };
   await assert.rejects(new ClaudeSummarizer({ loadSdk: async () => rejecting, getApiKey: () => 'k' }).summarize(request),
     e => e.code === ERROR_CODES.PROVIDER_REJECTED && e.details.providerMessage === 'Your credit balance is too low', 'το μήνυμα του παρόχου φτάνει στον χρήστη');
+});
+
+test('διαθεσιμότητα: χωρίς κλειδί Anthropic δεν γράφεται περίληψη (OO-015)', async () => {
+  const sdk = fakeSdk().module;
+  assert.deepEqual(await new ClaudeSummarizer({ loadSdk: async () => sdk, getApiKey: () => null }).checkAvailability(), { available: false, reason: ERROR_CODES.KEY_MISSING });
+  assert.deepEqual(await new ClaudeSummarizer({ loadSdk: async () => sdk, getApiKey: () => 'k' }).checkAvailability(), { available: true });
 });
 
 test('έλεγχος κλειδιού Anthropic', async () => {

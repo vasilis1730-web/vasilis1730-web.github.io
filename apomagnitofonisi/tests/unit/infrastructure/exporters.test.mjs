@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createZip, crc32 } from '../../../src/infrastructure/export/zip-store-writer.js';
 import { buildDocx, escapeXml } from '../../../src/infrastructure/export/docx-document.js';
-import { TxtTranscriptExporter, SrtTranscriptExporter, VttTranscriptExporter, JsonTranscriptExporter, MarkdownSummaryExporter } from '../../../src/infrastructure/export/text-exporters.js';
+import { TxtTranscriptExporter, SrtTranscriptExporter, VttTranscriptExporter, JsonTranscriptExporter, TxtSummaryExporter } from '../../../src/infrastructure/export/text-exporters.js';
 import { DocxTranscriptExporter, DocxSummaryExporter, markdownToDocxBlocks } from '../../../src/infrastructure/export/docx-exporters.js';
 import { createTranscript, addSummary } from '../../../src/domain/transcript.js';
 import { deserializeTranscript } from '../../../src/domain/transcript-codec.js';
@@ -123,7 +123,7 @@ test('SRT και VTT', () => {
 test('JSON: ξαναδιαβάζεται χωρίς απώλειες, και Markdown περίληψης', () => {
   const json = new JsonTranscriptExporter({ clock: { nowIso: () => '2026-11-04T12:00:00.000Z' }, appVersion: '1.0.0' }).render(transcript);
   assert.deepEqual(deserializeTranscript(json), transcript);
-  const md = new MarkdownSummaryExporter({ labels: testLabels }).render(transcript, transcript.summaries[0]);
+  const md = new TxtSummaryExporter({ labels: testLabels }).render(transcript, transcript.summaries[0]);
   assert.match(md, /^# Πρακτικά: Σύσκεψη/);
   assert.match(md, /Συντάχθηκε αυτόματα/);
 });
@@ -137,7 +137,7 @@ test('χωρίς τίτλο: τα έγγραφα γράφουν την ετικ�
   }), { id: 's1', kind: 'brief', model: 'm', createdAt: '2026-11-04T10:00:00.000Z', text: 'Κείμενο.' }, '2026-11-04T10:00:00.000Z');
   assert.equal(untitled.title, '');
   assert.match(new TxtTranscriptExporter({ labels: testLabels }).render(untitled), /^Μεταγραφή χωρίς τίτλο\r\n/);
-  assert.match(new MarkdownSummaryExporter({ labels: testLabels }).render(untitled, untitled.summaries[0]), /^# Περίληψη: Μεταγραφή χωρίς τίτλο/);
+  assert.match(new TxtSummaryExporter({ labels: testLabels }).render(untitled, untitled.summaries[0]), /^# Περίληψη: Μεταγραφή χωρίς τίτλο/);
   const document = readZip(new DocxTranscriptExporter({ labels: testLabels }).render(untitled)).get('word/document.xml');
   assert.match(document, /<w:t xml:space="preserve">Μεταγραφή χωρίς τίτλο<\/w:t>/);
 });

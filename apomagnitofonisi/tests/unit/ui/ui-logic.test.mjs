@@ -14,7 +14,7 @@ import { HashRouter } from '../../../src/ui/router.js';
 import { takeSharedFile } from '../../../src/ui/launch-intake.js';
 import { AppError, ERROR_CODES, INPUT_ISSUES, invalidInput } from '../../../src/application/errors.js';
 import { EXPORT_FORMATS } from '../../../src/application/export-formats.js';
-import { ERASE_TARGETS } from '../../../src/application/data-erasure-service.js';
+import { ERASE_TARGETS } from '../../../src/application/erase-targets.js';
 import { ENGINE_KINDS, SUMMARY_KINDS } from '../../../src/domain/transcript.js';
 import { LOCAL_QUALITY_PRESET_IDS, AUTO_LOCAL_QUALITY } from '../../../src/config/models.js';
 

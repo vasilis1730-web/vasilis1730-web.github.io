@@ -4,35 +4,47 @@
  * κωδικοί σφαλμάτων και λίστες μεταφοράς. Το whisper-worker.js απλώς τη συνδέει
  * με το `self` και με τα πραγματικά μοντέλα, ενώ τα tests με ψεύτικα.
  *
+ * Η πρόοδος λήψης έρχεται από το Transformers.js μία φορά ανά κομμάτι αρχείου
+ * (εκατοντάδες ανά δευτερόλεπτο). Ο worker τη στέλνει το πολύ μία φορά ανά
+ * `progressIntervalMs` (και πάντα στο τέλος κάθε αρχείου), ώστε η σελίδα να
+ * μην ξαναζωγραφίζει χωρίς λόγο (OO-001).
+ *
  * @typedef {import('./worker-protocol.js').LoadModelsPayload} LoadModelsPayload
  * @typedef {import('./worker-protocol.js').TranscribeWindowPayload} TranscribeWindowPayload
+ * @typedef {import('./worker-protocol.js').InferenceDevice} InferenceDevice
  *
  * @typedef {Object} LoadedModels
  * @property {{ transcribe: (samples: Float32Array, options: { startSec: number, whisperLanguage: string|null }) => Promise<{ start: number, end: number, text: string }[]> }} recognizer
  * @property {{ embed: (samples: Float32Array) => Promise<Float32Array|null> }|null} embedder
- * @property {'webgpu'|'wasm'} device
+ * @property {InferenceDevice} device
  *
  * @typedef {Object} WorkerHandlerDeps
  * @property {(payload: LoadModelsPayload, onProgress: (loadedBytes: number, totalBytes: number) => void) => Promise<LoadedModels>} loadModels
  * @property {(message: import('./worker-protocol.js').WorkerReply, transfer?: Transferable[]) => void} post
+ * @property {() => number} [now]  χιλιοστά του δευτερολέπτου (για τον ρυθμό της προόδου)
+ * @property {number} [progressIntervalMs]
  */
 import { ERROR_CODES } from '../../application/errors.js';
 import { PCM_SAMPLE_RATE } from '../../domain/audio/pcm.js';
 import { WORKER_REQUESTS, WORKER_REPLIES, WORKER_EVENTS } from './worker-protocol.js';
 
+/** Το πολύ 10 ειδοποιήσεις προόδου ανά δευτερόλεπτο. */
+export const MODEL_PROGRESS_INTERVAL_MS = 100;
+
 /**
  * @param {WorkerHandlerDeps} deps
  * @returns {{ onMessage: (message: import('./worker-protocol.js').WorkerRequest) => Promise<void> }}
  */
-export function createWhisperWorkerHandler({ loadModels, post }) {
+export function createWhisperWorkerHandler({ loadModels, post, now = () => Date.now(), progressIntervalMs = MODEL_PROGRESS_INTERVAL_MS }) {
   let models = null;
   let queue = Promise.resolve();
 
   const reply = (requestId, type, payload, transfer = []) => post({ requestId, type, payload }, transfer);
 
   async function handleLoad(requestId, payload) {
+    const sendProgress = throttleProgress((loadedBytes, totalBytes) => reply(requestId, WORKER_REPLIES.EVENT, { event: WORKER_EVENTS.MODEL_PROGRESS, loadedBytes, totalBytes }), { now, intervalMs: progressIntervalMs });
     try {
-      models = await loadModels(payload, (loadedBytes, totalBytes) => reply(requestId, WORKER_REPLIES.EVENT, { event: WORKER_EVENTS.MODEL_PROGRESS, loadedBytes, totalBytes }));
+      models = await loadModels(payload, sendProgress);
       reply(requestId, WORKER_REPLIES.RESULT, { device: models.device });
     } catch (error) {
       reply(requestId, WORKER_REPLIES.ERROR, workerError(ERROR_CODES.MODEL_LOAD_FAILED, error));
@@ -41,7 +53,8 @@ export function createWhisperWorkerHandler({ loadModels, post }) {
 
   async function handleWindow(requestId, payload) {
     if (!models) {
-      reply(requestId, WORKER_REPLIES.ERROR, { code: ERROR_CODES.MODEL_LOAD_FAILED, message: 'δεν έχει φορτωθεί μοντέλο' });
+      // Παράθυρο πριν από τη φόρτωση: λάθος σειράς της σελίδας, όχι αποτυχία φόρτωσης (API-019).
+      reply(requestId, WORKER_REPLIES.ERROR, { code: ERROR_CODES.UNKNOWN, message: 'μεταγραφή πριν από τη φόρτωση μοντέλων' });
       return;
     }
     try {
@@ -65,6 +78,23 @@ export function createWhisperWorkerHandler({ loadModels, post }) {
       queue = queue.then(() => handle(message || {}));
       return queue;
     },
+  };
+}
+
+/**
+ * Περνά μία ειδοποίηση το πολύ ανά `intervalMs`, και πάντα όταν ολοκληρώνεται
+ * η λήψη (loaded ≥ total), ώστε η σελίδα να βλέπει το τέλος.
+ * @param {(loadedBytes: number, totalBytes: number) => void} send
+ * @param {{ now: () => number, intervalMs: number }} options
+ */
+export function throttleProgress(send, { now, intervalMs }) {
+  let last = -Infinity;
+  return (loadedBytes, totalBytes) => {
+    const finished = totalBytes > 0 && loadedBytes >= totalBytes;
+    const time = now();
+    if (!finished && time - last < intervalMs) return;
+    last = time;
+    send(loadedBytes, totalBytes);
   };
 }
 

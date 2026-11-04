@@ -25,13 +25,14 @@
  * @property {string} label
  * @property {number} colorIndex  0 … SPEAKER_COLOR_COUNT-1
  *
- * @typedef {'brief'|'minutes'|'actions'|'custom'} SummaryKind
+ * @typedef {typeof SUMMARY_KINDS[keyof typeof SUMMARY_KINDS]} SummaryKind
  *
  * @typedef {Object} Summary
  * @property {string} id
  * @property {SummaryKind} kind
  * @property {string} [instruction]  μόνο για kind 'custom'
- * @property {string} model  το αναγνωριστικό του μοντέλου που την έγραψε (π.χ. claude-opus-5-5)
+ * @property {string} model  το ΑΝΑΓΝΩΡΙΣΤΙΚΟ του μοντέλου που την έγραψε (π.χ. claude-opus-5-5). Το όνομα
+ *   του πεδίου μένει «model» για συμβατότητα με όσα έχουν ήδη αποθηκευτεί και τα αρχεία .json (API-011).
  * @property {string} createdAt  ISO 8601
  * @property {string} text  Markdown
  * @property {boolean} [truncated]  το μοντέλο σταμάτησε στο όριο μήκους
@@ -42,11 +43,11 @@
  * @property {number} sizeBytes
  * @property {number|null} durationSec
  *
- * @typedef {'local'|'elevenlabs'} EngineKind
+ * @typedef {typeof ENGINE_KINDS[keyof typeof ENGINE_KINDS]} EngineKind
  *
  * @typedef {Object} TranscriptEngineInfo
  * @property {EngineKind} kind
- * @property {string} model
+ * @property {string} model  το αναγνωριστικό του μοντέλου μεταγραφής (αποθηκευμένο όνομα πεδίου, όπως στο Summary)
  *
  * @typedef {Object} Transcript
  * @property {number} schemaVersion
@@ -76,7 +77,8 @@ export const SUMMARY_KINDS = Object.freeze({
 /** Πόσα διαφορετικά χρώματα ομιλητών έχει η παλέτα της διεπαφής. */
 export const SPEAKER_COLOR_COUNT = 10;
 
-const MAX_TITLE_LENGTH = 200;
+/** Το μέγιστο μήκος τίτλου: ο κανόνας του μοντέλου, που τον δείχνει και η διεπαφή (CA-009). */
+export const MAX_TITLE_LENGTH = 200;
 
 /**
  * Οι κανόνες του μοντέλου που μπορεί να παραβιαστούν. Μόνο το EMPTY_SPEAKER_NAME

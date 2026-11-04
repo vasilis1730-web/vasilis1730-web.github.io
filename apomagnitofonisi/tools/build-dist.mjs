@@ -17,7 +17,8 @@
  * μια αλλαγή που ξεχνά την CSP (ή το αντίστροφο) δεν φτάνει ποτέ στο Cloudflare.
  *
  * Η διεύθυνση παραγωγής και το email επικοινωνίας έχουν μία πηγή, το
- * src/config/app-info.js (SITE_URL, CONTACT_EMAIL), που το διαβάζει και η εφαρμογή.
+ * src/config/app-info.js (SITE_URL, CONTACT_EMAIL). Το build τα διαβάζει από
+ * εκεί, και το privacy.html πρέπει να γράφει το ίδιο email (findContactProblems).
  *
  *   npm run build                       → dist/ για https://apomagnitofonisi.pages.dev
  *   PUBLIC_URL=https://apomagnitofonisi.texnikes.app npm run build

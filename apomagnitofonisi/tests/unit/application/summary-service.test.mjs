@@ -4,7 +4,7 @@ import { SummaryService } from '../../../src/application/summary-service.js';
 import { SUMMARY_SYSTEM_PROMPT, buildSummaryInstruction, formatTranscriptForPrompt } from '../../../src/application/summary-prompts.js';
 import { estimateSummaryCost, estimateTokens, EXPECTED_OUTPUT_TOKENS } from '../../../src/application/cost-estimate.js';
 import { ERROR_CODES, INPUT_ISSUES } from '../../../src/application/errors.js';
-import { createTranscript, SUMMARY_KINDS } from '../../../src/domain/transcript.js';
+import { createTranscript, addSummary, removeSummary, SUMMARY_KINDS } from '../../../src/domain/transcript.js';
 import { MemoryRepository, fixedClock, sequentialIds } from '../helpers/fakes.mjs';
 
 const transcript = createTranscript({
@@ -64,6 +64,7 @@ test('περίληψη: στέλνει prompt, μεταφέρει το κείμ�
     },
   };
   const repository = new MemoryRepository();
+  await repository.save(transcript);
   const service = new SummaryService({ summarizer, repository, clock: fixedClock('2026-11-04T12:00:00.000Z'), idGenerator: sequentialIds('s'), unknownSpeakerLabel: 'Άγνωστος ομιλητής' });
   const streamed = [];
   const { transcript: updated, summary, restarted } = await service.summarize(transcript, { kind: 'brief', modelId: 'claude-opus-5-5', onText: d => streamed.push(d) });
@@ -72,6 +73,7 @@ test('περίληψη: στέλνει prompt, μεταφέρει το κείμ�
   assert.equal(requests[0].systemPrompt, SUMMARY_SYSTEM_PROMPT);
   assert.equal(requests[0].modelId, 'claude-opus-5-5');
   assert.match(requests[0].transcriptText, /Πρόεδρος: Καλημέρα/);
+  assert.match(requests[0].promptInstruction, /περίληψη/i);
   assert.deepEqual(summary, { id: 's-1', kind: 'brief', model: 'claude-opus-5-5', createdAt: '2026-11-04T12:00:00.000Z', text: '## Περίληψη\nΈγινε συνεδρίαση.', truncated: true });
   assert.equal(updated.summaries[0].id, 's-1');
   assert.equal((await repository.findById('t1')).summaries.length, 1);
@@ -81,7 +83,9 @@ test('περίληψη: στέλνει prompt, μεταφέρει το κείμ�
 
 test('περίληψη: εφεδρικό μοντέλο, και η οδηγία του χρήστη αποθηκεύεται', async () => {
   const summarizer = { async summarize(request) { request.onRestart?.(); return { text: 'Κείμενο.', modelId: 'claude-opus-4-8', truncated: false, restarted: true }; } };
-  const service = new SummaryService({ summarizer, repository: new MemoryRepository(), clock: fixedClock(), idGenerator: sequentialIds('s'), unknownSpeakerLabel: '?' });
+  const repository = new MemoryRepository();
+  await repository.save(transcript);
+  const service = new SummaryService({ summarizer, repository, clock: fixedClock(), idGenerator: sequentialIds('s'), unknownSpeakerLabel: '?' });
   let restarts = 0;
   const outcome = await service.summarize(transcript, { kind: 'custom', customInstruction: '  Μόνο τα οικονομικά. ', modelId: 'claude-opus-5-5', onRestart: () => { restarts += 1; } });
   assert.equal(restarts, 1);
@@ -104,4 +108,38 @@ test('περίληψη: άγνωστο μοντέλο, κενή οδηγία, κ
   assert.equal(calls, 0, 'τίποτα δεν στέλνεται στον πάροχο');
   await assert.rejects(service.summarize(transcript, { kind: 'brief', modelId: 'claude-opus-5-5' }), e => e.code === ERROR_CODES.CANCELLED);
   assert.equal(service.estimateCost(transcript, { kind: 'custom', customInstruction: '', modelId: 'claude-opus-5-5' }).outputTokens, 2500);
+});
+
+test('περίληψη: αποθηκεύεται πάνω στην τρέχουσα μεταγραφή, όχι σε αυτή που δόθηκε στην αρχή (OO-013)', async () => {
+  const repository = new MemoryRepository();
+  const old = { id: 'old', kind: SUMMARY_KINDS.BRIEF, model: 'claude-opus-5-5', createdAt: '2026-11-04T09:00:00.000Z', text: 'Παλιά.' };
+  const start = addSummary(transcript, old, '2026-11-04T09:00:00.000Z');
+  await repository.save(start);
+  const summarizer = {
+    async summarize() {
+      // Όσο γράφεται η νέα, ο χρήστης σβήνει την παλιά περίληψη.
+      await repository.save(removeSummary(start, 'old', '2026-11-04T09:30:00.000Z'));
+      return { text: 'Νέα.', modelId: 'claude-opus-5-5', truncated: false, restarted: false };
+    },
+  };
+  const service = new SummaryService({ summarizer, repository, clock: fixedClock('2026-11-04T10:00:00.000Z'), idGenerator: sequentialIds('s'), unknownSpeakerLabel: '?' });
+  const outcome = await service.summarize(start, { kind: SUMMARY_KINDS.MINUTES, modelId: 'claude-opus-5-5' });
+  assert.deepEqual(outcome.transcript.summaries.map(s => s.id), ['s-1'], 'η σβησμένη περίληψη δεν επιστρέφει');
+  assert.deepEqual((await repository.findById('t1')).summaries.map(s => s.id), ['s-1']);
+
+  // Η μεταγραφή σβήστηκε όσο γραφόταν η περίληψη: δεν ξαναδημιουργείται.
+  const gone = new MemoryRepository();
+  await gone.save(transcript);
+  const deleting = new SummaryService({
+    summarizer: { async summarize() { await gone.remove('t1'); return { text: 'Χ.', modelId: 'claude-opus-5-5', truncated: false, restarted: false }; } },
+    repository: gone, clock: fixedClock(), idGenerator: sequentialIds('s'), unknownSpeakerLabel: '?',
+  });
+  await assert.rejects(deleting.summarize(transcript, { kind: SUMMARY_KINDS.BRIEF, modelId: 'claude-opus-5-5' }), e => e.code === ERROR_CODES.NOT_FOUND);
+  assert.equal(await gone.findById('t1'), null);
+});
+
+test('διαθεσιμότητα της περίληψης: όπως τη λέει ο Summarizer (OO-015)', async () => {
+  const make = summarizer => new SummaryService({ summarizer, repository: new MemoryRepository(), clock: fixedClock(), idGenerator: sequentialIds(), unknownSpeakerLabel: '?' });
+  assert.deepEqual(await make({ async summarize() {}, async checkAvailability() { return { available: false, reason: ERROR_CODES.KEY_MISSING }; } }).checkAvailability(), { available: false, reason: ERROR_CODES.KEY_MISSING });
+  assert.deepEqual(await make({ async summarize() {} }).checkAvailability(), { available: true }, 'χωρίς έλεγχο: διαθέσιμη');
 });

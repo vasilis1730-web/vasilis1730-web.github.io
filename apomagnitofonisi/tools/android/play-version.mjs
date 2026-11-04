@@ -12,19 +12,31 @@
 export const MAX_VERSION_CODE = 2_100_000_000;
 
 /**
- * Η έκδοση ενός build. Κενό versionCodeOverride = versionCode από την ώρα.
+ * Ένα versionCode όπως έρχεται από τη γραμμή εντολών ή το input του workflow.
+ * Κενό = δεν δόθηκε (undefined). Αλλιώς ακέραιος από 1 έως MAX_VERSION_CODE,
+ * μόνο με ψηφία: «12abc», «1e3», «-5» και «0» απορρίπτονται.
+ * @param {string|number|null|undefined} raw
+ * @returns {number|undefined}
+ */
+export function parseVersionCode(raw) {
+  const text = String(raw ?? '').trim();
+  if (!text) return undefined;
+  const versionCode = Number(text);
+  if (!/^\d+$/.test(text) || !Number.isSafeInteger(versionCode) || versionCode < 1 || versionCode > MAX_VERSION_CODE) {
+    throw new Error(`μη έγκυρο versionCode «${text}»: ακέραιος από 1 έως ${MAX_VERSION_CODE}`);
+  }
+  return versionCode;
+}
+
+/**
+ * Η έκδοση ενός build. Χωρίς versionCodeOverride, το versionCode βγαίνει από την ώρα.
  * @param {Date} [date]
- * @param {string|number} [versionCodeOverride] ρητό versionCode (ακέραιος από 1 έως MAX_VERSION_CODE)
+ * @param {string|number} [versionCodeOverride] ρητό versionCode (κενό = από την ώρα), περνά από το parseVersionCode
  * @returns {{ versionCode: number, versionName: string }}
  */
 export function versionFor(date = new Date(), versionCodeOverride = '') {
   const pad = n => String(n).padStart(2, '0');
   const y = date.getUTCFullYear(), m = pad(date.getUTCMonth() + 1), d = pad(date.getUTCDate()), h = pad(date.getUTCHours());
-  const name = `${y}.${m}.${d}.${h}`;
-  const raw = String(versionCodeOverride ?? '').trim();
-  const versionCode = raw ? Number(raw) : Number(`${y}${m}${d}${h}`);
-  if ((raw && !/^\d+$/.test(raw)) || !Number.isSafeInteger(versionCode) || versionCode < 1 || versionCode > MAX_VERSION_CODE) {
-    throw new Error(`μη έγκυρο versionCode ${raw || versionCode}: ακέραιος από 1 έως ${MAX_VERSION_CODE}`);
-  }
-  return { versionCode, versionName: name };
+  const versionCode = parseVersionCode(versionCodeOverride) ?? parseVersionCode(`${y}${m}${d}${h}`);
+  return { versionCode, versionName: `${y}.${m}.${d}.${h}` };
 }

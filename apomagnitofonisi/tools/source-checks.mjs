@@ -109,7 +109,7 @@ export function urlLiteralsIn(text) {
  * ή να είναι η ίδια η εφαρμογή (selfOrigins: οι διευθύνσεις όπου σερβίρεται,
  * που για την CSP είναι 'self').
  */
-export function checkScriptUrls({ file, text, csp, navigationHosts = NAVIGATION_HOSTS, selfOrigins = [] }) {
+export function findScriptUrlProblems({ file, text, csp, navigationHosts = NAVIGATION_HOSTS, selfOrigins = [] }) {
   const problems = [];
   for (const { raw, url, line } of urlLiteralsIn(text)) {
     const allowed = selfOrigins.includes(url.origin) || cspAllows(csp, 'connect-src', url) || cspAllows(csp, 'script-src', url)
@@ -124,12 +124,12 @@ export function checkScriptUrls({ file, text, csp, navigationHosts = NAVIGATION_
  * έκδοση, που το επιτρέπουν και το script-src (import) και το connect-src
  * (οι βιβλιοθήκες κατεβάζουν από εκεί και τα .wasm τους).
  */
-export function checkVendorModule({ file = VENDOR_MODULE, text, csp }) {
+export function findVendorModuleProblems({ file = VENDOR_MODULE, text, csp }) {
   const problems = [];
   const urls = urlLiteralsIn(text);
   if (!urls.length) problems.push(`${file}: δεν βρέθηκε κανένα URL βιβλιοθήκης`);
   for (const { raw, url, line } of urls) {
-    const pinned = checkJsdelivrPin(raw);
+    const pinned = describeJsdelivrPin(raw);
     if (!pinned.ok) problems.push(`${file}:${line}: ${pinned.reason}: ${raw}`);
     if (!cspAllows(csp, 'script-src', url)) problems.push(`${file}:${line}: το script-src της CSP δεν επιτρέπει το ${url.hostname}`);
     if (!cspAllows(csp, 'connect-src', url)) problems.push(`${file}:${line}: το connect-src της CSP δεν επιτρέπει το ${url.hostname}`);
@@ -138,12 +138,13 @@ export function checkVendorModule({ file = VENDOR_MODULE, text, csp }) {
 }
 
 /**
- * Ελέγχει αν ένα URL του jsDelivr ονομάζει πακέτο με ακριβή έκδοση. URL χωρίς
- * πακέτο (π.χ. το πρόθεμα https://cdn.jsdelivr.net/npm/ του service worker) δεν αφορά.
+ * Περιγράφει πώς καρφιτσώνεται ένα URL του jsDelivr: αν ονομάζει πακέτο, με
+ * ποια έκδοση, και αν η έκδοση είναι ακριβής (ok). URL χωρίς πακέτο (π.χ. το
+ * πρόθεμα https://cdn.jsdelivr.net/npm/ του service worker) δεν αφορά.
  * @param {string} raw
  * @returns {{ ok: boolean, reason?: string, packageNamed?: boolean, version?: string }}
  */
-export function checkJsdelivrPin(raw) {
+export function describeJsdelivrPin(raw) {
   if (!/^https:\/\/cdn\.jsdelivr\.net\//i.test(raw)) return { ok: false, reason: 'βιβλιοθήκη εκτός jsDelivr' };
   const match = raw.match(JSDELIVR_PACKAGE_URL);
   if (!match) return { ok: true, packageNamed: false };
@@ -153,10 +154,10 @@ export function checkJsdelivrPin(raw) {
 }
 
 /** Πακέτο του jsDelivr έξω από το src/config/vendor.js = δεύτερη πηγή εκδόσεων, δεν επιτρέπεται. */
-export function checkVendorUrlsOutsideVendorModule({ file, text }) {
+export function findStrayVendorUrlProblems({ file, text }) {
   if (file === VENDOR_MODULE) return [];
   return urlLiteralsIn(text)
-    .filter(({ raw }) => /^https:\/\/cdn\.jsdelivr\.net\//i.test(raw) && checkJsdelivrPin(raw).packageNamed)
+    .filter(({ raw }) => /^https:\/\/cdn\.jsdelivr\.net\//i.test(raw) && describeJsdelivrPin(raw).packageNamed)
     .map(({ raw, line }) => `${file}:${line}: URL βιβλιοθήκης έξω από το ${VENDOR_MODULE}: ${raw}`);
 }
 
@@ -192,7 +193,7 @@ function attributeOf(tag, name) {
  * map), κανένας χειριστής on…=, κανένα style= ή <style>, κανένα javascript:,
  * και κάθε εξωτερικός πόρος επιτρέπεται από την οδηγία του.
  */
-export function checkHtml({ file, text, csp }) {
+export function findHtmlProblems({ file, text, csp }) {
   const problems = [];
   const at = index => `${file}:${positionOf(text, index).line}`;
   for (const match of text.matchAll(/<script\b[^>]*>/gi)) {
@@ -232,12 +233,12 @@ export function findPublishedSourceProblems({ files, csp, navigationHosts = NAVI
   for (const { path: file, text } of files) {
     for (const hit of findForbiddenCharacters(text)) problems.push(`${file}:${hit.line}: ${hit.name} «${hit.excerpt}»`);
     for (const hit of findSecrets(text)) problems.push(`${file}:${hit.line}: κάτι που μοιάζει με ${hit.name}`);
-    if (/\.html$/i.test(file)) problems.push(...checkHtml({ file, text, csp }));
+    if (/\.html$/i.test(file)) problems.push(...findHtmlProblems({ file, text, csp }));
     if (/\.m?js$/i.test(file)) {
-      problems.push(...checkScriptUrls({ file, text, csp, navigationHosts, selfOrigins }));
-      problems.push(...checkVendorUrlsOutsideVendorModule({ file, text }));
+      problems.push(...findScriptUrlProblems({ file, text, csp, navigationHosts, selfOrigins }));
+      problems.push(...findStrayVendorUrlProblems({ file, text }));
     }
-    if (file === VENDOR_MODULE) problems.push(...checkVendorModule({ file, text, csp }));
+    if (file === VENDOR_MODULE) problems.push(...findVendorModuleProblems({ file, text, csp }));
   }
   return problems;
 }

@@ -2,6 +2,10 @@
  * Οι ρυθμίσεις του χρήστη, με προεπιλογές και έλεγχο κάθε τιμής. Ό,τι δεν
  * είναι έγκυρο (π.χ. από παλιά έκδοση) αγνοείται και μένει η προεπιλογή.
  * Το αν τα κλειδιά μένουν στη συσκευή το κρατά μόνο το KeyStore (μία πηγή).
+ *
+ * Μετονομασίες (API-011): η ποιότητα στη συσκευή λεγόταν «localQualityPreset»,
+ * αν και κρατά και το «Αυτόματα». Η παλιά αποθηκευμένη τιμή διαβάζεται μία
+ * φορά (LEGACY_KEYS) και αποθηκεύεται με το νέο όνομα στην επόμενη αλλαγή.
  */
 import { ENGINE_KINDS } from '../domain/transcript.js';
 import { isSupportedLanguageCode, DEFAULT_LANGUAGE_CODE } from '../config/languages.js';
@@ -14,7 +18,7 @@ import { MAX_EXPECTED_SPEAKERS } from './limits.js';
  * @property {string} languageCode
  * @property {Record<import('./ports.js').EngineKind, boolean>} diarizeByEngine  διαχωρισμός ομιλητών ανά μηχανή
  * @property {number|null} expectedSpeakers
- * @property {import('./ports.js').LocalQualityChoice} localQualityPreset
+ * @property {import('./ports.js').LocalQualityChoice} localQuality  επίπεδο ποιότητας στη συσκευή ή «Αυτόματα»
  * @property {string} claudeModelId
  * @property {boolean} removeAnoTeleia
  * @property {boolean} onboardingDismissed
@@ -29,7 +33,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   // Στη συσκευή ο διαχωρισμός είναι πειραματικός (και κατεβάζει μοντέλο), στο cloud ακριβής.
   diarizeByEngine: Object.freeze({ [ENGINE_KINDS.LOCAL]: false, [ENGINE_KINDS.ELEVENLABS]: true }),
   expectedSpeakers: null,
-  localQualityPreset: AUTO_LOCAL_QUALITY,
+  localQuality: AUTO_LOCAL_QUALITY,
   claudeModelId: DEFAULT_CLAUDE_MODEL_ID,
   removeAnoTeleia: true,
   onboardingDismissed: false,
@@ -43,11 +47,14 @@ const VALIDATORS = Object.freeze({
   // Μία σημαία ανά μηχανή του ENGINE_KINDS (OO-006): νέα μηχανή δεν θέλει αλλαγή εδώ.
   diarizeByEngine: v => v != null && typeof v === 'object' && ENGINE_KIND_VALUES.every(kind => isBoolean(v[kind])),
   expectedSpeakers: v => v === null || (Number.isInteger(v) && v >= 1 && v <= MAX_EXPECTED_SPEAKERS),
-  localQualityPreset: v => isLocalQualityChoice(v),
+  localQuality: v => isLocalQualityChoice(v),
   claudeModelId: v => findClaudeModel(v) != null,
   removeAnoTeleia: isBoolean,
   onboardingDismissed: isBoolean,
 });
+
+/** Παλιό όνομα ρύθμισης → νέο (API-011). */
+const LEGACY_KEYS = Object.freeze({ localQualityPreset: 'localQuality' });
 
 export class SettingsService {
   #store;
@@ -90,9 +97,13 @@ export class SettingsService {
 }
 
 function sanitize(stored, defaults) {
+  const migrated = { ...stored };
+  for (const [legacy, current] of Object.entries(LEGACY_KEYS)) {
+    if (!(current in migrated) && legacy in migrated) migrated[current] = migrated[legacy];
+  }
   const result = { ...defaults };
   for (const [key, valid] of Object.entries(VALIDATORS)) {
-    if (key in stored && valid(stored[key])) result[key] = stored[key];
+    if (key in migrated && valid(migrated[key])) result[key] = migrated[key];
   }
   return freeze(result);
 }

@@ -3,6 +3,12 @@
  * μεταγραφή, ζητά από τον Summarizer να γράψει, δίνει το κείμενο όσο
  * γράφεται και αποθηκεύει την περίληψη μαζί με τη μεταγραφή.
  *
+ * Η σύνταξη κρατά από δευτερόλεπτα έως λεπτά. Στο μεταξύ ο χρήστης μπορεί να
+ * διορθώσει τη μεταγραφή ή να σβήσει άλλη περίληψη, γι' αυτό η υπηρεσία
+ * αποθηκεύει την περίληψη πάνω στην ΤΡΕΧΟΥΣΑ αποθηκευμένη μεταγραφή και όχι
+ * σε αυτή που πήρε στην αρχή (OO-013). Αν η μεταγραφή σβήστηκε στο μεταξύ, δεν
+ * ξαναδημιουργείται.
+ *
  * Οι περιλήψεις γίνονται μόνο με Claude (απόφαση του έργου), γι' αυτό η
  * υπηρεσία ελέγχει και τιμολογεί τα μοντέλα από τον κατάλογο CLAUDE_MODELS.
  */
@@ -52,6 +58,15 @@ export class SummaryService {
   }
 
   /**
+   * Αν μπορεί να γραφτεί περίληψη τώρα (π.χ. υπάρχει κλειδί), όπως το λέει ο
+   * Summarizer (OO-015): η διεπαφή δεν ξέρει ποιος πάροχος και ποιο κλειδί.
+   * @returns {Promise<import('./ports.js').Availability>}
+   */
+  async checkAvailability() {
+    return typeof this.#summarizer.checkAvailability === 'function' ? this.#summarizer.checkAvailability() : { available: true };
+  }
+
+  /**
    * Χονδρική εκτίμηση κόστους πριν από την αποστολή.
    * @param {import('../domain/transcript.js').Transcript} transcript
    * @param {Pick<SummaryOptions, 'kind'|'customInstruction'|'modelId'>} options
@@ -72,14 +87,14 @@ export class SummaryService {
   async summarize(transcript, { kind, customInstruction = '', modelId, signal, onText, onRestart }) {
     requireModel(modelId);
     if (!transcript.segments.length) throw new AppError(ERROR_CODES.EMPTY_TRANSCRIPT, 'η μεταγραφή δεν έχει κείμενο');
-    const instruction = buildSummaryInstruction(kind, customInstruction);
+    const promptInstruction = buildSummaryInstruction(kind, customInstruction);
 
     let result;
     try {
       result = await this.#summarizer.summarize({
         systemPrompt: SUMMARY_SYSTEM_PROMPT,
         transcriptText: this.#transcriptText(transcript),
-        instruction,
+        promptInstruction,
         modelId,
         signal,
         onText,
@@ -100,7 +115,10 @@ export class SummaryService {
       text: result.text,
       ...(result.truncated ? { truncated: true } : {}),
     };
-    const updated = addSummary(transcript, summary, now);
+    // Η τρέχουσα αποθηκευμένη μορφή (OO-013): ό,τι άλλαξε όσο γραφόταν η περίληψη μένει.
+    const latest = await this.#repository.findById(transcript.id);
+    if (!latest) throw new AppError(ERROR_CODES.NOT_FOUND, `η μεταγραφή ${transcript.id} σβήστηκε όσο γραφόταν η περίληψη`);
+    const updated = addSummary(latest, summary, now);
     await this.#repository.save(updated);
     return { transcript: updated, summary, restarted: Boolean(result.restarted) };
   }

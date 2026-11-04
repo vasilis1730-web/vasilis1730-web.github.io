@@ -9,7 +9,7 @@
 export const SHARE_INBOX_CACHE = 'apomagnitofonisi-share-inbox';
 export const SHARED_FILE_NAME_HEADER = 'X-Shared-File-Name';
 
-export class SharedFileInbox {
+export class BrowserSharedFileInbox {
   #caches;
 
   /** @param {{ caches: CacheStorage|undefined }} deps */

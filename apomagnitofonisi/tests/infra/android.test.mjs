@@ -6,9 +6,9 @@ import path from 'node:path';
 import { ROOT } from '../../tools/paths.mjs';
 import { ANDROID_DIR, ANDROID_APPS, SHARE_TARGET_METADATA, SHARED_MIME_TYPES, readTwaManifest, scopePathOf } from '../../tools/android/project.mjs';
 import { ASSET_LINK_RELATIONS, assetLinks, assetLinksJson, formatFingerprint } from '../../tools/android/asset-links.mjs';
-import { MAX_VERSION_CODE, versionFor } from '../../tools/android/play-version.mjs';
+import { MAX_VERSION_CODE, versionFor, parseVersionCode } from '../../tools/android/play-version.mjs';
 import {
-  TARGET_SDK, MIN_SDK, parseBadging, parseResources, parseApksignerCerts, parseKeytoolCerts, checkApk, checkShareTarget,
+  TARGET_SDK, MIN_SDK, parseBadging, parseResources, parseApksignerCerts, parseKeytoolCerts, findApkProblems, findShareTargetProblems,
 } from '../../tools/android/apk-inspection.mjs';
 import { parseArgs, releaseSummary, COMMAND_FLAGS } from '../../tools/android.mjs';
 import { read, exists, skipWhileAppPending, tempDir } from './helpers.mjs';
@@ -246,17 +246,32 @@ test('η έκδοση για το Play είναι ΕΕΕΕΜΜΗΗΩΩ σε UTC,
   assert.ok(versionFor(new Date(Date.UTC(2027, 0, 1, 0))).versionCode > versionFor(new Date(Date.UTC(2026, 11, 31, 23))).versionCode);
   assert.ok(versionFor(new Date(Date.UTC(2099, 11, 31, 23))).versionCode <= MAX_VERSION_CODE);
   assert.equal(versionFor(new Date(Date.UTC(2026, 10, 4, 14)), '42').versionCode, 42, 'ρητό versionCode από το input του workflow');
-  for (const bad of ['0', '-1', 'abc', '1.5', '2100000001', '1e3']) {
+  for (const bad of ['0', '-1', 'abc', '1.5', '2100000001', '1e3', '12abc']) {
     assert.throws(() => versionFor(new Date(), bad), /μη έγκυρο versionCode/, `απορρίπτεται το ${bad}`);
+    assert.throws(() => parseVersionCode(bad), new RegExp(`μη έγκυρο versionCode «${bad.replace(/[.+]/g, m => `\\${m}`)}»`), `το parseVersionCode απορρίπτει το ${bad}`);
   }
+  assert.equal(parseVersionCode(' 2026110415 '), 2026110415);
+  assert.equal(parseVersionCode(MAX_VERSION_CODE), MAX_VERSION_CODE);
+  for (const empty of ['', '  ', undefined, null]) assert.equal(parseVersionCode(empty), undefined, 'κενό = δεν δόθηκε');
 });
 
 test('το tools/android.mjs δέχεται σε κάθε εντολή μόνο τις δικές της παραμέτρους, με την ίδια --version-code παντού', () => {
   assert.deepEqual(parseArgs(['version']), { command: 'version' });
-  assert.deepEqual(parseArgs(['version', '--version-code', '']), { command: 'version', versionCode: '' }, 'κενό input του workflow = από την ώρα');
-  assert.deepEqual(parseArgs(['inspect', '--version-code', '7']), { command: 'inspect', versionCode: '7' });
+  assert.deepEqual(parseArgs(['version', '--version-code', '']), { command: 'version' }, 'κενό input του workflow = από την ώρα');
+  assert.deepEqual(parseArgs(['version', '--version-code', '2026110415']), { command: 'version', versionCode: 2026110415 });
+  assert.deepEqual(parseArgs(['inspect']), { command: 'inspect' }, 'στο inspect το versionCode είναι προαιρετικό');
+  assert.deepEqual(parseArgs(['inspect', '--version-code', '7']), { command: 'inspect', versionCode: 7 });
   assert.deepEqual(parseArgs(['release', '--keystore', 'k', '--out', 'o', '--version-code', '9']),
-    { command: 'release', keystore: 'k', out: 'o', versionCode: '9' });
+    { command: 'release', keystore: 'k', out: 'o', versionCode: 9 });
+  assert.deepEqual(parseArgs(['release', '--keystore', 'k', '--version-code', '9']), { command: 'release', keystore: 'k', versionCode: 9 }, 'το --out έχει προεπιλογή');
+  // Το versionCode ελέγχεται μία φορά, στο parseArgs, για όλες τις εντολές: πριν από κάθε δουλειά.
+  for (const command of ['version', 'inspect', 'release']) {
+    assert.throws(() => parseArgs([command, '--version-code', 'abc']), /μη έγκυρο versionCode «abc»/, `${command}: άκυρο versionCode`);
+    assert.throws(() => parseArgs([command, '--version-code', '12abc']), /μη έγκυρο versionCode/, `${command}: ψηφία με γράμματα`);
+  }
+  assert.throws(() => parseArgs(['release', '--keystore', 'k', '--out', 'o']), /η εντολή release θέλει --version-code/);
+  assert.throws(() => parseArgs(['release', '--keystore', 'k', '--version-code', '']), /η εντολή release θέλει --version-code/, 'κενό δεν αρκεί στο release');
+  assert.throws(() => parseArgs(['release', '--version-code', '9']), /η εντολή release θέλει --keystore/);
   for (const command of Object.keys(COMMAND_FLAGS)) {
     assert.ok(Object.hasOwn(COMMAND_FLAGS[command], '--version-code'), `${command}: --version-code`);
   }
@@ -351,8 +366,8 @@ test('ανάγνωση της εξόδου aapt2, apksigner και keytool, κα
 
   const twa = readTwaManifest(APP);
   const ok = { app: APP, twa, badging, resources, manifestTree: MANIFEST_TREE, versionCode: 2026010100 };
-  assert.deepEqual(checkApk(ok), []);
-  const problems = changes => checkApk({ ...ok, ...changes }).join('\n');
+  assert.deepEqual(findApkProblems(ok), []);
+  const problems = changes => findApkProblems({ ...ok, ...changes }).join('\n');
   assert.match(problems({ versionCode: 1 }), /versionCode 2026010100 αντί για 1/);
   assert.match(problems({ badging: { ...badging, targetSdk: 35 } }), /targetSdk 35/);
   assert.match(problems({ badging: { ...badging, minSdk: 21 } }), /minSdk 21 αντί για 24/);
@@ -368,7 +383,7 @@ test('ανάγνωση της εξόδου aapt2, apksigner και keytool, κα
   assert.match(problems({ resources: { ...resources, 'string/shareTarget': SHARE_TARGET_JSON.replace('/share-target', '/upload') } }), /share target action/);
   assert.match(problems({ manifestTree: MANIFEST_TREE.replace('"video/*" (Raw: "video/*")', '"text/plain" (Raw: "text/plain")') }), /δεν δέχεται video\/\*/);
   assert.match(problems({ manifestTree: MANIFEST_TREE.replace(`="${SHARE_TARGET_METADATA}"`, '="other"').replace(`"${SHARE_TARGET_METADATA}")`, '"other")') }), /METADATA_SHARE_TARGET/);
-  assert.deepEqual(checkShareTarget({ app: APP, twa: { ...twa, shareTarget: undefined }, resources, manifestTree: MANIFEST_TREE }), [`${APP}: το twa-manifest.json δεν έχει shareTarget`]);
+  assert.deepEqual(findShareTargetProblems({ app: APP, twa: { ...twa, shareTarget: undefined }, resources, manifestTree: MANIFEST_TREE }), [`${APP}: το twa-manifest.json δεν έχει shareTarget`]);
 });
 
 test('κανένα κλειδί υπογραφής, APK ή AAB στο repository', () => {

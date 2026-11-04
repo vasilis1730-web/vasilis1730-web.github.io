@@ -4,8 +4,8 @@ import {
   parseHeaderRules, ruleMatches, headersFor, cspOf, directiveSources, effectiveSources, sourceAllowsUrl, cspAllows,
 } from '../../tools/headers.mjs';
 import {
-  findForbiddenCharacters, findSecrets, urlLiteralsIn, checkScriptUrls, checkVendorModule, checkJsdelivrPin,
-  checkVendorUrlsOutsideVendorModule, checkHtml, findPublishedSourceProblems, VENDOR_MODULE,
+  findForbiddenCharacters, findSecrets, urlLiteralsIn, findScriptUrlProblems, findVendorModuleProblems, describeJsdelivrPin,
+  findStrayVendorUrlProblems, findHtmlProblems, findPublishedSourceProblems, VENDOR_MODULE,
 } from '../../tools/source-checks.mjs';
 
 /* Οι καθαρές συναρτήσεις των εργαλείων ελέγχου (tools/headers.mjs και
@@ -88,41 +88,41 @@ test('τα URL του κώδικα: μόνο συμβολοσειρές https, �
   ].join('\n');
   assert.deepEqual(urlLiteralsIn(text).map(u => [u.url.hostname, u.line]), [['api.example.org', 2], ['api.example.org', 3]]);
 
-  const ok = checkScriptUrls({ file: 'src/a.js', text: "fetch('https://api.example.org/x'); import('https://cdn.example.org/m.js'); a.href = 'https://elevenlabs.io/app';", csp: CSP });
+  const ok = findScriptUrlProblems({ file: 'src/a.js', text: "fetch('https://api.example.org/x'); import('https://cdn.example.org/m.js'); a.href = 'https://elevenlabs.io/app';", csp: CSP });
   assert.deepEqual(ok, [], 'connect-src, script-src και σύνδεσμος πλοήγησης');
-  const bad = checkScriptUrls({ file: 'src/a.js', text: "fetch('https://tracker.example/collect');", csp: CSP });
+  const bad = findScriptUrlProblems({ file: 'src/a.js', text: "fetch('https://tracker.example/collect');", csp: CSP });
   assert.match(bad.join('\n'), /src\/a\.js:1: το tracker\.example δεν επιτρέπεται/);
   const own = "export const SITE = 'https://app.example/';";
-  assert.equal(checkScriptUrls({ file: 'src/b.js', text: own, csp: CSP }).length, 1);
-  assert.deepEqual(checkScriptUrls({ file: 'src/b.js', text: own, csp: CSP, selfOrigins: ['https://app.example'] }), [],
+  assert.equal(findScriptUrlProblems({ file: 'src/b.js', text: own, csp: CSP }).length, 1);
+  assert.deepEqual(findScriptUrlProblems({ file: 'src/b.js', text: own, csp: CSP, selfOrigins: ['https://app.example'] }), [],
     'το URL της ίδιας της εφαρμογής είναι self');
 });
 
 test('οι βιβλιοθήκες τρίτων: μόνο στο vendor.js, μόνο jsDelivr με ακριβή έκδοση, επιτρεπτές από την CSP', () => {
-  assert.deepEqual(checkJsdelivrPin('https://cdn.jsdelivr.net/npm/mediabunny@1.65.1/dist/bundles/mediabunny.min.mjs'), { ok: true, packageNamed: true, version: '1.65.1' });
-  assert.equal(checkJsdelivrPin('https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@1.4.0/+esm').version, '1.4.0', 'scoped πακέτο με +esm');
-  assert.equal(checkJsdelivrPin('https://cdn.jsdelivr.net/npm/pkg@4.4.0-next.0/x.js').ok, true, 'προέκδοση με ακριβή αριθμό');
-  assert.match(checkJsdelivrPin('https://cdn.jsdelivr.net/npm/mediabunny/dist/x.mjs').reason, /χωρίς έκδοση/);
-  assert.match(checkJsdelivrPin('https://cdn.jsdelivr.net/npm/mediabunny@1/dist/x.mjs').reason, /δεν είναι ακριβής/);
-  assert.match(checkJsdelivrPin('https://cdn.jsdelivr.net/npm/mediabunny@latest/x.mjs').reason, /δεν είναι ακριβής/);
-  assert.match(checkJsdelivrPin('https://unpkg.com/mediabunny@1.65.1/x.mjs').reason, /εκτός jsDelivr/);
-  assert.equal(checkJsdelivrPin('https://cdn.jsdelivr.net/npm/').packageNamed, false, 'πρόθεμα χωρίς πακέτο (service worker)');
+  assert.deepEqual(describeJsdelivrPin('https://cdn.jsdelivr.net/npm/mediabunny@1.65.1/dist/bundles/mediabunny.min.mjs'), { ok: true, packageNamed: true, version: '1.65.1' });
+  assert.equal(describeJsdelivrPin('https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@1.4.0/+esm').version, '1.4.0', 'scoped πακέτο με +esm');
+  assert.equal(describeJsdelivrPin('https://cdn.jsdelivr.net/npm/pkg@4.4.0-next.0/x.js').ok, true, 'προέκδοση με ακριβή αριθμό');
+  assert.match(describeJsdelivrPin('https://cdn.jsdelivr.net/npm/mediabunny/dist/x.mjs').reason, /χωρίς έκδοση/);
+  assert.match(describeJsdelivrPin('https://cdn.jsdelivr.net/npm/mediabunny@1/dist/x.mjs').reason, /δεν είναι ακριβής/);
+  assert.match(describeJsdelivrPin('https://cdn.jsdelivr.net/npm/mediabunny@latest/x.mjs').reason, /δεν είναι ακριβής/);
+  assert.match(describeJsdelivrPin('https://unpkg.com/mediabunny@1.65.1/x.mjs').reason, /εκτός jsDelivr/);
+  assert.equal(describeJsdelivrPin('https://cdn.jsdelivr.net/npm/').packageNamed, false, 'πρόθεμα χωρίς πακέτο (service worker)');
 
   const csp = "script-src 'self' https://cdn.jsdelivr.net; connect-src 'self' https://cdn.jsdelivr.net";
-  assert.deepEqual(checkVendorModule({ text: "export const A = 'https://cdn.jsdelivr.net/npm/a@1.2.3/a.mjs';", csp }), []);
-  assert.match(checkVendorModule({ text: "export const A = 'https://cdn.jsdelivr.net/npm/a@^1.2.3/a.mjs';", csp }).join('\n'), /δεν είναι ακριβής/);
-  assert.match(checkVendorModule({ text: "export const A = 'https://cdn.jsdelivr.net/npm/a@1.2.3/a.mjs';", csp: "script-src 'self'" }).join('\n'), /script-src[\s\S]*connect-src/);
-  assert.match(checkVendorModule({ text: 'export const NOTHING = 1;', csp }).join('\n'), /κανένα URL/);
-  assert.match(checkVendorUrlsOutsideVendorModule({ file: 'src/x.js', text: "import('https://cdn.jsdelivr.net/npm/a@1.2.3/a.mjs');" }).join('\n'), /έξω από το src\/config\/vendor\.js/);
-  assert.deepEqual(checkVendorUrlsOutsideVendorModule({ file: 'sw.js', text: "const CDN = 'https://cdn.jsdelivr.net/npm/';" }), []);
-  assert.deepEqual(checkVendorUrlsOutsideVendorModule({ file: VENDOR_MODULE, text: "const A = 'https://cdn.jsdelivr.net/npm/a@1.2.3/a.mjs';" }), []);
+  assert.deepEqual(findVendorModuleProblems({ text: "export const A = 'https://cdn.jsdelivr.net/npm/a@1.2.3/a.mjs';", csp }), []);
+  assert.match(findVendorModuleProblems({ text: "export const A = 'https://cdn.jsdelivr.net/npm/a@^1.2.3/a.mjs';", csp }).join('\n'), /δεν είναι ακριβής/);
+  assert.match(findVendorModuleProblems({ text: "export const A = 'https://cdn.jsdelivr.net/npm/a@1.2.3/a.mjs';", csp: "script-src 'self'" }).join('\n'), /script-src[\s\S]*connect-src/);
+  assert.match(findVendorModuleProblems({ text: 'export const NOTHING = 1;', csp }).join('\n'), /κανένα URL/);
+  assert.match(findStrayVendorUrlProblems({ file: 'src/x.js', text: "import('https://cdn.jsdelivr.net/npm/a@1.2.3/a.mjs');" }).join('\n'), /έξω από το src\/config\/vendor\.js/);
+  assert.deepEqual(findStrayVendorUrlProblems({ file: 'sw.js', text: "const CDN = 'https://cdn.jsdelivr.net/npm/';" }), []);
+  assert.deepEqual(findStrayVendorUrlProblems({ file: VENDOR_MODULE, text: "const A = 'https://cdn.jsdelivr.net/npm/a@1.2.3/a.mjs';" }), []);
 });
 
 test('οι σελίδες HTML δεν έχουν ό,τι κόβει η αυστηρή CSP', () => {
   const clean = '<!doctype html><html><head><link rel="stylesheet" href="./src/styles/app.css"><link rel="manifest" href="./manifest.json">'
     + '<script type="module" src="./src/main.js"></script></head><body><a href="https://elevenlabs.io/">ElevenLabs</a></body></html>';
-  assert.deepEqual(checkHtml({ file: 'index.html', text: clean, csp: CSP }), []);
-  const problems = html => checkHtml({ file: 'x.html', text: html, csp: CSP }).join('\n');
+  assert.deepEqual(findHtmlProblems({ file: 'index.html', text: clean, csp: CSP }), []);
+  const problems = html => findHtmlProblems({ file: 'x.html', text: html, csp: CSP }).join('\n');
   assert.match(problems('<script>alert(1)</script>'), /inline <script>/);
   assert.match(problems('<script type="importmap">{}</script>'), /inline <script>/, 'ούτε import map');
   assert.match(problems('<button onclick="go()">x</button>'), /on…=/);

@@ -4,7 +4,7 @@ import { LocalWhisperEngine } from '../../../src/infrastructure/whisper/local-wh
 import { selectLocalModel, resolvePresetId, describeQualityPresets } from '../../../src/infrastructure/whisper/local-model-selection.js';
 import { WorkerClient } from '../../../src/infrastructure/whisper/worker-client.js';
 import { WORKER_REQUESTS, WORKER_REPLIES, WORKER_EVENTS } from '../../../src/infrastructure/whisper/worker-protocol.js';
-import { createWhisperWorkerHandler, segmentSamples } from '../../../src/infrastructure/whisper/whisper-worker-handler.js';
+import { createWhisperWorkerHandler, segmentSamples, throttleProgress } from '../../../src/infrastructure/whisper/whisper-worker-handler.js';
 import { configureTransformers, createDownloadProgress, WhisperRecognizer } from '../../../src/infrastructure/whisper/whisper-recognizer.js';
 import { SpeakerEmbedder } from '../../../src/infrastructure/whisper/speaker-embedder.js';
 import { AppError, ERROR_CODES } from '../../../src/application/errors.js';
@@ -78,12 +78,12 @@ function tone(seconds) {
 function reader(chunks, { durationSec = 60, hasAudio = true } = {}) {
   return {
     async probe() { return { durationSec, hasAudio, hasVideo: false, audioCodec: 'aac' }; },
-    async *readMono16k() { for (const c of chunks) yield c; },
+    async *readMonoPcm() { for (const c of chunks) yield c; },
     async extractCompactAudio(m) { return { audio: m, compacted: false }; },
   };
 }
 
-const LOCAL_OPTIONS = { languageCode: 'el', diarize: false, expectedSpeakers: null, localQualityPreset: 'fast' };
+const LOCAL_OPTIONS = { languageCode: 'el', diarize: false, expectedSpeakers: null, localQuality: 'fast' };
 
 test('ροή: παράθυρα στον worker με τη σειρά, πρόοδος, παραισθήσεις έξω, χωρίς ομιλητές', async () => {
   const workers = [];
@@ -123,7 +123,7 @@ test('ροή: παράθυρα στον worker με τη σειρά, πρόοδ�
   assert.deepEqual(result.segments.map(s => s.start), [...result.segments.map(s => s.start)].sort((a, b) => a - b));
   assert.equal(partial.length, result.segments.length);
   assert.ok(stages.includes('downloading-model') && stages.includes('transcribing'));
-  assert.equal(result.model, 'onnx-community/whisper-base');
+  assert.equal(result.modelId, 'onnx-community/whisper-base');
   assert.equal(result.languageCode, 'el');
   assert.equal(workers[0].terminated, true, 'ο worker τερματίζεται στο τέλος');
 });
@@ -149,7 +149,7 @@ test('διαχωρισμός ομιλητών από αποτυπώματα, κ�
     mediaReader: reader([tone(15)], { durationSec: 15 }),
     detectCapabilities: async () => WASM_ONLY,
   });
-  const result = await engine.recognize({ media: {}, options: { languageCode: 'auto', diarize: true, expectedSpeakers: null, localQualityPreset: 'auto' } });
+  const result = await engine.recognize({ media: {}, options: { languageCode: 'auto', diarize: true, expectedSpeakers: null, localQuality: 'auto' } });
   assert.deepEqual(result.segments.map(s => [s.text, s.speakerKey]), [['α', 'local-0'], ['β', 'local-0'], ['γ', 'local-1']]);
   assert.equal(result.languageCode, null);
   assert.equal(worker.loads[0].speaker.repo, 'onnx-community/wespeaker-voxceleb-resnet34-LM');
@@ -162,10 +162,10 @@ test('χωρίς ήχο, χωρίς WebGPU για το «ακριβές», σφ�
   const base = { createWorker: () => new HandlerWorker(), detectCapabilities: async () => WASM_ONLY };
   await assert.rejects(new LocalWhisperEngine({ ...base, mediaReader: reader([], { hasAudio: false }) }).recognize({ media: {}, options: LOCAL_OPTIONS }), e => e.code === ERROR_CODES.NO_AUDIO_TRACK);
   const engine = new LocalWhisperEngine({ ...base, mediaReader: reader([]) });
-  assert.deepEqual(await engine.checkAvailability({ ...LOCAL_OPTIONS, localQualityPreset: 'accurate' }), { available: false, reason: ERROR_CODES.DEVICE_UNSUPPORTED });
-  assert.deepEqual(await engine.checkAvailability({ ...LOCAL_OPTIONS, localQualityPreset: 'fast' }), { available: true });
+  assert.deepEqual(await engine.checkAvailability({ ...LOCAL_OPTIONS, localQuality: 'accurate' }), { available: false, reason: ERROR_CODES.DEVICE_UNSUPPORTED });
+  assert.deepEqual(await engine.checkAvailability({ ...LOCAL_OPTIONS, localQuality: 'fast' }), { available: true });
   assert.deepEqual(await engine.checkAvailability(), { available: true }, 'χωρίς επιλογές: αυτόματη ποιότητα');
-  await assert.rejects(engine.recognize({ media: {}, options: { ...LOCAL_OPTIONS, localQualityPreset: 'accurate' } }), e => e.code === ERROR_CODES.DEVICE_UNSUPPORTED);
+  await assert.rejects(engine.recognize({ media: {}, options: { ...LOCAL_OPTIONS, localQuality: 'accurate' } }), e => e.code === ERROR_CODES.DEVICE_UNSUPPORTED);
   const noWorkers = new LocalWhisperEngine({ ...base, detectCapabilities: async () => ({ ...WASM_ONLY, workers: false }), mediaReader: reader([]) });
   assert.deepEqual(await noWorkers.checkAvailability(LOCAL_OPTIONS), { available: false, reason: ERROR_CODES.DEVICE_UNSUPPORTED });
   assert.deepEqual((await engine.describeQualityPresets()).presets.map(p => p.available), [true, true, false]);
@@ -178,7 +178,7 @@ test('χωρίς ήχο, χωρίς WebGPU για το «ακριβές», σφ�
   const controller = new AbortController();
   const slow = {
     ...reader([]),
-    async *readMono16k() { yield tone(30); controller.abort(); yield tone(30); },
+    async *readMonoPcm() { yield tone(30); controller.abort(); yield tone(30); },
   };
   let worker;
   const cancelled = new LocalWhisperEngine({ ...base, createWorker: () => (worker = new HandlerWorker()), mediaReader: slow });
@@ -209,7 +209,7 @@ test('λογική του worker: σειρά, άγνωστο αίτημα, με�
   const window = (requestId, startSec) => ({ requestId, type: WORKER_REQUESTS.TRANSCRIBE_WINDOW, payload: { startSec, samples: tone(3), whisperLanguage: 'greek', embedSpeakers: true } });
 
   await handler.onMessage(window(1, 0));
-  assert.deepEqual(replies.at(-1).payload, { code: ERROR_CODES.MODEL_LOAD_FAILED, message: 'δεν έχει φορτωθεί μοντέλο' });
+  assert.deepEqual(replies.at(-1).payload, { code: ERROR_CODES.UNKNOWN, message: 'μεταγραφή πριν από τη φόρτωση μοντέλων' }, 'λάθος σειράς της σελίδας, όχι αποτυχία φόρτωσης');
   await handler.onMessage({ requestId: 2, type: 'κάτι άλλο', payload: {} });
   assert.equal(replies.at(-1).type, WORKER_REPLIES.ERROR);
   assert.equal(replies.at(-1).payload.code, ERROR_CODES.UNKNOWN);
@@ -236,32 +236,50 @@ test('κομμάτι ήχου ενός τμήματος μέσα στο παρά
   assert.equal(segmentSamples(samples, 100, { start: 109, end: 120 }).length, PCM_SAMPLE_RATE, 'κόβεται στο τέλος του παραθύρου');
 });
 
-test('WorkerClient: απαντήσεις ανά αίτημα, ειδοποιήσεις, σφάλματα και τερματισμός', async () => {
-  const worker = { posted: [], postMessage(m) { this.posted.push(m); }, terminate() { this.terminated = true; } };
+test('WorkerClient: μία μέθοδος ανά αίτημα, ειδοποιήσεις προόδου, σφάλματα και τερματισμός', async () => {
+  const worker = { posted: [], postMessage(m, transfer) { this.posted.push({ m, transfer }); }, terminate() { this.terminated = true; } };
   const client = new WorkerClient(worker);
   const events = [];
-  const first = client.request(WORKER_REQUESTS.LOAD_MODELS, 1, { onEvent: e => events.push(e) });
-  const second = client.request(WORKER_REQUESTS.TRANSCRIBE_WINDOW, 2);
-  worker.onmessage({ data: { requestId: 2, type: WORKER_REPLIES.RESULT, payload: 'Β' } });
+  const load = client.loadModels({ speech: {} }, { onModelProgress: e => events.push(e) });
+  const samples = new Float32Array(4);
+  const window = client.transcribeWindow({ startSec: 0, samples, whisperLanguage: null, embedSpeakers: false });
+  assert.equal(worker.posted[0].m.type, WORKER_REQUESTS.LOAD_MODELS);
+  assert.deepEqual(worker.posted[0].transfer, []);
+  assert.equal(worker.posted[1].m.type, WORKER_REQUESTS.TRANSCRIBE_WINDOW);
+  assert.deepEqual(worker.posted[1].transfer, [samples.buffer], 'τα δείγματα μεταφέρονται, η λίστα φτιάχνεται στον client');
+  worker.onmessage({ data: { requestId: 2, type: WORKER_REPLIES.RESULT, payload: { segments: [] } } });
   worker.onmessage({ data: { requestId: 1, type: WORKER_REPLIES.EVENT, payload: { event: WORKER_EVENTS.MODEL_PROGRESS, loadedBytes: 1, totalBytes: 2 } } });
+  worker.onmessage({ data: { requestId: 1, type: WORKER_REPLIES.EVENT, payload: { event: 'κάτι άλλο' } } });
   worker.onmessage({ data: { requestId: 1, type: WORKER_REPLIES.ERROR, payload: { code: 'NETWORK', message: 'x' } } });
   worker.onmessage({ data: { requestId: 99, type: WORKER_REPLIES.RESULT, payload: 'ορφανό' } });
-  assert.equal(await second, 'Β');
-  await assert.rejects(first, e => e.code === ERROR_CODES.NETWORK);
-  assert.deepEqual(events, [{ event: WORKER_EVENTS.MODEL_PROGRESS, loadedBytes: 1, totalBytes: 2 }]);
-  assert.deepEqual(worker.posted[0], { requestId: 1, type: WORKER_REQUESTS.LOAD_MODELS, payload: 1 });
-  const third = client.request(WORKER_REQUESTS.TRANSCRIBE_WINDOW, 3);
+  assert.deepEqual(await window, { segments: [] });
+  await assert.rejects(load, e => e.code === ERROR_CODES.NETWORK);
+  assert.deepEqual(events, [{ event: WORKER_EVENTS.MODEL_PROGRESS, loadedBytes: 1, totalBytes: 2 }], 'μόνο οι ειδοποιήσεις προόδου');
+  assert.equal(typeof client.request, 'undefined', 'το γενικό αίτημα είναι ιδιωτικό');
+  const third = client.transcribeWindow({ startSec: 0, samples: new Float32Array(1), whisperLanguage: null, embedSpeakers: false });
   client.terminate();
   await assert.rejects(third, e => e.code === ERROR_CODES.CANCELLED);
-  await assert.rejects(client.request(WORKER_REQUESTS.TRANSCRIBE_WINDOW, 4), e => e.code === ERROR_CODES.CANCELLED);
+  await assert.rejects(client.loadModels({}), e => e.code === ERROR_CODES.CANCELLED);
   assert.equal(worker.terminated, true);
+});
+
+test('πρόοδος λήψης από τον worker: το πολύ μία ανά διάστημα, πάντα το τέλος', () => {
+  let time = 0;
+  const sent = [];
+  const send = throttleProgress((loaded, total) => sent.push([loaded, total]), { now: () => time, intervalMs: 100 });
+  send(1, 100);
+  time = 50; send(2, 100);
+  time = 99; send(3, 100);
+  time = 150; send(4, 100);
+  time = 160; send(100, 100);
+  assert.deepEqual(sent, [[1, 100], [4, 100], [100, 100]]);
 });
 
 test('WorkerClient: όταν ο worker καταρρεύσει, κάθε αίτημα παίρνει τον κωδικό της φάσης του', async () => {
   const worker = { postMessage() {}, terminate() {} };
   const client = new WorkerClient(worker);
-  const loading = client.request(WORKER_REQUESTS.LOAD_MODELS, {});
-  const transcribing = client.request(WORKER_REQUESTS.TRANSCRIBE_WINDOW, {});
+  const loading = client.loadModels({});
+  const transcribing = client.transcribeWindow({ startSec: 0, samples: new Float32Array(1), whisperLanguage: null, embedSpeakers: false });
   let prevented = false;
   worker.onerror({ message: 'out of memory', preventDefault: () => { prevented = true; } });
   await assert.rejects(loading, e => e.code === ERROR_CODES.MODEL_LOAD_FAILED);

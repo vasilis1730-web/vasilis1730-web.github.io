@@ -4,7 +4,7 @@
 
 /**
  * Η συχνότητα δειγματοληψίας του PCM που ανταλλάσσουν ο αναγνώστης αρχείων
- * (θύρα MediaReader.readMono16k), τα παράθυρα του Whisper και τα αποτυπώματα
+ * (θύρα MediaReader.readMonoPcm), τα παράθυρα του Whisper και τα αποτυπώματα
  * φωνής (CA-003). Μοναδική πηγή της τιμής: το Whisper δέχεται μόνο 16 kHz.
  */
 export const PCM_SAMPLE_RATE = 16000;

@@ -21,7 +21,6 @@ import { ENGINE_KINDS } from '../../domain/transcript.js';
 import { explicitLanguageCode, whisperLanguageFor } from '../../config/languages.js';
 import { SPEAKER_EMBEDDING_MODEL } from '../../config/models.js';
 import { WorkerClient } from './worker-client.js';
-import { WORKER_REQUESTS, WORKER_EVENTS } from './worker-protocol.js';
 import { selectLocalModel, describeQualityPresets } from './local-model-selection.js';
 
 const MAX_WASM_THREADS = 4;
@@ -51,7 +50,7 @@ export class LocalWhisperEngine {
   async checkAvailability(options = {}) {
     const caps = await this.#detectCapabilities();
     if (!caps.webAssembly || !caps.workers) return { available: false, reason: ERROR_CODES.DEVICE_UNSUPPORTED };
-    if (!selectLocalModel(options.localQualityPreset, caps)) return { available: false, reason: ERROR_CODES.DEVICE_UNSUPPORTED };
+    if (!selectLocalModel(options.localQuality, caps)) return { available: false, reason: ERROR_CODES.DEVICE_UNSUPPORTED };
     return { available: true };
   }
 
@@ -66,7 +65,7 @@ export class LocalWhisperEngine {
    */
   async recognize({ media, options, signal, onProgress, onPartialSegments }) {
     const caps = await this.#detectCapabilities();
-    const model = selectLocalModel(options.localQualityPreset, caps);
+    const model = selectLocalModel(options.localQuality, caps);
     if (!model) throw new AppError(ERROR_CODES.DEVICE_UNSUPPORTED, 'το επίπεδο ποιότητας θέλει WebGPU');
     onProgress?.({ stage: PROGRESS_STAGES.READING });
     const info = await this.#mediaReader.probe(media);
@@ -83,7 +82,7 @@ export class LocalWhisperEngine {
         segments: options.diarize ? withSpeakers(recognized, options.expectedSpeakers) : recognized.map(withoutSpeaker),
         languageCode: explicitLanguageCode(options.languageCode),
         durationSec: info.durationSec,
-        model: model.repo,
+        modelId: model.repo,
       };
     } catch (error) {
       if ((signal && signal.aborted) || isCancellation(error)) throw new AppError(ERROR_CODES.CANCELLED, 'ακυρώθηκε', { cause: error });
@@ -102,11 +101,12 @@ export class LocalWhisperEngine {
       speaker: options.diarize ? { repo: SPEAKER_EMBEDDING_MODEL.repo, dtype: SPEAKER_EMBEDDING_MODEL.dtype } : null,
       wasmThreads: caps.crossOriginIsolated ? Math.max(1, Math.min(MAX_WASM_THREADS, caps.hardwareConcurrency)) : 1,
     };
-    await worker.request(WORKER_REQUESTS.LOAD_MODELS, payload, {
-      onEvent: progress => {
-        if (progress.event !== WORKER_EVENTS.MODEL_PROGRESS) return;
-        onProgress?.({ stage: PROGRESS_STAGES.DOWNLOADING_MODEL, fraction: clampFraction(progress.loadedBytes / progress.totalBytes), detail: { loadedBytes: progress.loadedBytes, totalBytes: progress.totalBytes } });
-      },
+    await worker.loadModels(payload, {
+      onModelProgress: ({ loadedBytes, totalBytes }) => onProgress?.({
+        stage: PROGRESS_STAGES.DOWNLOADING_MODEL,
+        fraction: clampFraction(loadedBytes / totalBytes),
+        detail: { loadedBytes, totalBytes },
+      }),
     });
   }
 
@@ -129,7 +129,7 @@ export class LocalWhisperEngine {
       while (inFlight.size >= this.#maxWindowsInFlight) await Promise.race(inFlight);
       /** @type {import('./worker-protocol.js').TranscribeWindowPayload} */
       const payload = { startSec: window.startSec, samples: window.samples, whisperLanguage, embedSpeakers: options.diarize };
-      const pending = worker.request(WORKER_REQUESTS.TRANSCRIBE_WINDOW, payload, { transfer: [window.samples.buffer] }).then(result => {
+      const pending = worker.transcribeWindow(payload).then(result => {
         const segments = result.segments.filter(s => !isLikelyHallucination(s.text));
         recognized.push(...segments);
         doneSec += windowSec;
@@ -143,7 +143,7 @@ export class LocalWhisperEngine {
     };
 
     reportProgress();
-    for await (const pcm of this.#mediaReader.readMono16k(media, { signal })) {
+    for await (const pcm of this.#mediaReader.readMonoPcm(media, { signal })) {
       decodedSec += pcm.length / PCM_SAMPLE_RATE;
       for (const window of assembler.push(pcm)) await submit(window);
     }

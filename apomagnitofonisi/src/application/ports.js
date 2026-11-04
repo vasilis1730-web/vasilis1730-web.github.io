@@ -5,10 +5,15 @@
  * προβολές εξαρτώνται από αυτά τα συμβόλαια και ποτέ από συγκεκριμένο adapter
  * (CA-001, OO-008). Τη σύνδεση την κάνει μόνο το src/main.js (composition root).
  *
+ * Οι τύποι των κλειστών συνόλων (μηχανές, είδη, πάροχοι, στόχοι διαγραφής)
+ * προκύπτουν από τις σταθερές τους (API-004) και εισάγονται μόνο από
+ * αρχεία χωρίς εξαρτήσεις, ώστε οι θύρες να μην εξαρτώνται από υπηρεσίες (CA-012).
+ *
  * --------------------------------------------------------------- Μεταγραφή
  *
  * @typedef {import('../domain/transcript.js').Transcript} Transcript
  * @typedef {import('../domain/transcript.js').Summary} Summary
+ * @typedef {import('../domain/transcript.js').SummaryKind} SummaryKind
  * @typedef {import('../domain/transcript.js').EngineKind} EngineKind
  * @typedef {import('../domain/transcript.js').TranscriptEngineInfo} TranscriptEngineInfo
  * @typedef {import('../domain/words-to-segments.js').RecognizedSegment} RecognizedSegment
@@ -21,7 +26,7 @@
  * @property {string} languageCode  'auto' ή ISO 639-1
  * @property {boolean} diarize  διαχωρισμός ομιλητών
  * @property {number|null} expectedSpeakers  γνωστό πλήθος ομιλητών ή null (αυτόματα)
- * @property {LocalQualityChoice} [localQualityPreset]  μόνο για τη μηχανή στη συσκευή
+ * @property {LocalQualityChoice} [localQuality]  επίπεδο ή «Αυτόματα», μόνο για τη μηχανή στη συσκευή (API-011)
  *
  * @typedef {Object} RecognitionRequest
  * @property {Blob} media  το αρχείο (File) του χρήστη
@@ -34,11 +39,13 @@
  * @property {RecognizedSegment[]} segments  ταξινομημένα κατά χρόνο
  * @property {string|null} languageCode  η γλώσσα που αναγνωρίστηκε ή ζητήθηκε (ISO 639-1)
  * @property {number|null} durationSec
- * @property {string} model  το μοντέλο που έκανε τη μεταγραφή
+ * @property {string} modelId  το μοντέλο που έκανε τη μεταγραφή
  *
- * @typedef {Object} EngineAvailability
+ * @typedef {Object} Availability  αν μπορεί να γίνει κάτι τώρα, και αν όχι γιατί
  * @property {boolean} available
- * @property {ErrorCode} [reason]  γιατί δεν είναι διαθέσιμη (π.χ. KEY_MISSING)
+ * @property {ErrorCode} [reason]  π.χ. KEY_MISSING, DEVICE_UNSUPPORTED
+ *
+ * @typedef {Availability} EngineAvailability
  *
  * @typedef {Object} QualityPresetOption
  * @property {LocalQualityPresetId} id
@@ -70,8 +77,8 @@
  *
  * @typedef {Object} MediaReader
  * @property {(media: Blob) => Promise<MediaInfo>} probe
- * @property {(media: Blob, options?: { signal?: AbortSignal }) => AsyncIterable<Float32Array>} readMono16k
- *   PCM με συχνότητα PCM_SAMPLE_RATE (domain/audio/pcm.js, 16 kHz), ένα κανάλι, σε διαδοχικά κομμάτια
+ * @property {(media: Blob, options?: { signal?: AbortSignal }) => AsyncIterable<Float32Array>} readMonoPcm
+ *   PCM με συχνότητα PCM_SAMPLE_RATE (domain/audio/pcm.js), ένα κανάλι, σε διαδοχικά κομμάτια
  * @property {(media: Blob, options?: { signal?: AbortSignal, onFraction?: (fraction: number) => void }) => Promise<CompactAudio>} extractCompactAudio
  *   μόνο ο ήχος, συμπιεσμένος για αποστολή. Πετά σφάλμα όταν το αρχείο δεν διαβάζεται.
  *
@@ -80,7 +87,7 @@
  * @typedef {Object} SummaryRequest
  * @property {string} systemPrompt
  * @property {string} transcriptText  η μεταγραφή ως γραμμές «[hh:mm:ss] Όνομα: κείμενο»
- * @property {string} instruction  τι να γράψει το μοντέλο
+ * @property {string} promptInstruction  τι να γράψει το μοντέλο (η οδηγία ανά είδος, API-011)
  * @property {string} modelId  π.χ. claude-opus-5-5
  * @property {AbortSignal} [signal]
  * @property {(delta: string) => void} [onText]  κείμενο όσο γράφεται
@@ -94,6 +101,7 @@
  *
  * @typedef {Object} Summarizer
  * @property {(request: SummaryRequest) => Promise<SummaryResult>} summarize
+ * @property {() => Promise<Availability>} [checkAvailability]  π.χ. αν υπάρχει κλειδί (OO-015)
  *
  * --------------------------------------------------------------- Αποθήκευση
  *
@@ -119,15 +127,15 @@
  * @property {(settings: Record<string, unknown>) => void} save
  * @property {() => void} clear
  *
- * @typedef {import('./api-key-service.js').KeyProvider} KeyProvider
- * @typedef {'device'|'session'} KeyRetention  στη συσκευή ή μόνο για την καρτέλα
+ * @typedef {import('./key-providers.js').KeyProvider} KeyProvider
+ * @typedef {import('./key-providers.js').KeyRetention} KeyRetention  στη συσκευή ή μόνο για την καρτέλα
  *
  * @typedef {Object} KeyStore  τα κλειδιά API του χρήστη, μόνο στη συσκευή του
  * @property {(provider: KeyProvider) => string|null} getKey
  * @property {(provider: KeyProvider, key: string) => void} setKey
  * @property {(provider: KeyProvider) => void} removeKey
  * @property {(retention: KeyRetention) => void} setKeyRetention
- * @property {() => KeyRetention} keyRetention
+ * @property {() => KeyRetention} getKeyRetention
  * @property {() => void} clear  διαγραφή όλων των κλειδιών και της επιλογής διατήρησης
  *
  * @typedef {Object} KeyVerifier
@@ -151,7 +159,7 @@
  * @property {() => Promise<void>} clear
  *
  * @typedef {Object} Erasable  ό,τι σβήνει η «Διαγραφή όλων των δεδομένων»
- * @property {string} name  σταθερό όνομα (ERASE_TARGETS), για το μήνυμα όταν αποτύχει
+ * @property {import('./erase-targets.js').EraseTarget} name  για το μήνυμα όταν αποτύχει
  * @property {() => Promise<void>|void} erase
  *
  * --------------------------------------------------------------- Εξαγωγή και παράδοση αρχείων
@@ -187,7 +195,7 @@
  * @property {string} summaryNotice  π.χ. «Συντάχθηκε αυτόματα με Claude από τη μεταγραφή.»
  * @property {(iso: string) => string} formatDate
  * @property {(engine: TranscriptEngineInfo) => string} describeEngine
- * @property {(kind: string) => string} summaryTitleFor  π.χ. 'minutes' → «Πρακτικά συνεδρίασης»
+ * @property {(kind: SummaryKind) => string} summaryTitleFor  π.χ. 'minutes' → «Πρακτικά συνεδρίασης»
  *
  * @typedef {Object} FileMetadata
  * @property {string} fileName

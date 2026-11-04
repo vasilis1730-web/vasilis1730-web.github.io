@@ -56,7 +56,7 @@ export class MediabunnyMediaReader {
    * @param {{ signal?: AbortSignal }} [options]
    * @returns {AsyncGenerator<Float32Array>}
    */
-  async *readMono16k(media, { signal } = {}) {
+  async *readMonoPcm(media, { signal } = {}) {
     const mb = await this.#loadMediabunny();
     const input = openInput(mb, media);
     try {

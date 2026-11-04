@@ -77,8 +77,8 @@ export class JsonTranscriptExporter {
   }
 }
 
-/** Η περίληψη όπως την έγραψε το μοντέλο (Markdown), με τίτλο και σημείωση. */
-export class MarkdownSummaryExporter {
+/** Η περίληψη σε .txt, όπως την έγραψε το μοντέλο (Markdown), με τίτλο και σημείωση. */
+export class TxtSummaryExporter {
   format = EXPORT_FORMATS.TXT;
   extension = 'txt';
   mimeType = TEXT_MIME;

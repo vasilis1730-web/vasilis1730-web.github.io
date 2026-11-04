@@ -1,14 +1,22 @@
 /**
- * Αιτήματα προς έναν Web Worker με promises: κάθε αίτημα έχει requestId και
- * περιμένει τη δική του απάντηση, με προαιρετικές ενδιάμεσες ειδοποιήσεις.
- * Ο τερματισμός απορρίπτει όσα αιτήματα εκκρεμούν με CANCELLED.
+ * Ο worker των μοντέλων από την πλευρά της σελίδας, με μία μέθοδο ανά αίτημα
+ * του πρωτοκόλλου (API-019): loadModels και transcribeWindow, με τους τύπους
+ * τους και τη λίστα μεταφοράς φτιαγμένη εδώ. Κάθε αίτημα έχει requestId και
+ * περιμένει τη δική του απάντηση. Ο τερματισμός απορρίπτει όσα αιτήματα
+ * εκκρεμούν με CANCELLED.
  *
  * Αν ο worker καταρρεύσει (onerror), κάθε αίτημα που εκκρεμεί απορρίπτεται με
  * τον κωδικό που ταιριάζει στο είδος του (API-002): MODEL_LOAD_FAILED για τη
  * φόρτωση μοντέλων, TRANSCRIPTION_FAILED για τη μεταγραφή.
+ *
+ * @typedef {import('./worker-protocol.js').LoadModelsPayload} LoadModelsPayload
+ * @typedef {import('./worker-protocol.js').LoadModelsResult} LoadModelsResult
+ * @typedef {import('./worker-protocol.js').TranscribeWindowPayload} TranscribeWindowPayload
+ * @typedef {import('./worker-protocol.js').TranscribeWindowResult} TranscribeWindowResult
+ * @typedef {import('./worker-protocol.js').ModelProgressEvent} ModelProgressEvent
  */
 import { AppError, ERROR_CODES } from '../../application/errors.js';
-import { WORKER_REPLIES, WORKER_REQUESTS } from './worker-protocol.js';
+import { WORKER_REPLIES, WORKER_REQUESTS, WORKER_EVENTS } from './worker-protocol.js';
 
 export class WorkerClient {
   #worker;
@@ -27,18 +35,25 @@ export class WorkerClient {
   }
 
   /**
-   * @param {string} type  ένα από τα WORKER_REQUESTS
-   * @param {unknown} payload
-   * @param {{ transfer?: Transferable[], onEvent?: (event: any) => void }} [options]
-   * @returns {Promise<any>} το payload της απάντησης RESULT
+   * Φόρτωση των μοντέλων (πρώτο αίτημα).
+   * @param {LoadModelsPayload} payload
+   * @param {{ onModelProgress?: (event: ModelProgressEvent) => void }} [options]
+   * @returns {Promise<LoadModelsResult>}
    */
-  request(type, payload, { transfer = [], onEvent } = {}) {
-    if (this.#terminated) return Promise.reject(new AppError(ERROR_CODES.CANCELLED, 'ο worker έχει τερματιστεί'));
-    const requestId = this.#nextId++;
-    return new Promise((resolve, reject) => {
-      this.#pending.set(requestId, { type, resolve, reject, onEvent });
-      this.#worker.postMessage({ requestId, type, payload }, transfer);
+  loadModels(payload, { onModelProgress } = {}) {
+    return this.#request(WORKER_REQUESTS.LOAD_MODELS, payload, {
+      onEvent: event => { if (event && event.event === WORKER_EVENTS.MODEL_PROGRESS) onModelProgress?.(event); },
     });
+  }
+
+  /**
+   * Μεταγραφή ενός παραθύρου. Τα δείγματα ΜΕΤΑΦΕΡΟΝΤΑΙ στον worker: μετά την
+   * κλήση το `payload.samples` δεν χρησιμοποιείται πια στη σελίδα.
+   * @param {TranscribeWindowPayload} payload
+   * @returns {Promise<TranscribeWindowResult>}
+   */
+  transcribeWindow(payload) {
+    return this.#request(WORKER_REQUESTS.TRANSCRIBE_WINDOW, payload, { transfer: [payload.samples.buffer] });
   }
 
   terminate() {
@@ -46,6 +61,15 @@ export class WorkerClient {
     this.#terminated = true;
     this.#worker.terminate();
     this.#failAll(() => new AppError(ERROR_CODES.CANCELLED, 'ακυρώθηκε'));
+  }
+
+  #request(type, payload, { transfer = [], onEvent } = {}) {
+    if (this.#terminated) return Promise.reject(new AppError(ERROR_CODES.CANCELLED, 'ο worker έχει τερματιστεί'));
+    const requestId = this.#nextId++;
+    return new Promise((resolve, reject) => {
+      this.#pending.set(requestId, { type, resolve, reject, onEvent });
+      this.#worker.postMessage({ requestId, type, payload }, transfer);
+    });
   }
 
   #receive(message) {

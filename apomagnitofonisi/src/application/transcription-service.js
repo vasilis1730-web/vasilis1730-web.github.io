@@ -116,7 +116,7 @@ export class TranscriptionService {
         durationSec: result.durationSec ?? null,
       },
       languageCode: result.languageCode || explicitLanguageCode(options.languageCode),
-      engine: { kind: engineKind, model: result.model },
+      engine: { kind: engineKind, model: result.modelId },
       speakers,
       segments: cleaned.map((segment, index) => ({
         id: `seg-${index + 1}`,

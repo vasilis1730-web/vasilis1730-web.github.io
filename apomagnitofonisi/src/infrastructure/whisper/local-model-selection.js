@@ -10,11 +10,12 @@
  * @typedef {Object} LocalModelChoice
  * @property {LocalQualityPresetId} presetId
  * @property {string} repo
- * @property {'webgpu'|'wasm'} device
+ * @property {import('./worker-protocol.js').InferenceDevice} device
  * @property {Record<string, string>} dtype
  * @property {number} approxDownloadMb
  */
 import { LOCAL_MODEL_PRESETS, LOCAL_QUALITY_PRESET_IDS, AUTO_LOCAL_QUALITY, findLocalModelPreset } from '../../config/models.js';
+import { INFERENCE_DEVICES } from './worker-protocol.js';
 
 /** «Αυτόματα»: ισορροπημένο με WebGPU, γρήγορο χωρίς (σε CPU το small είναι αργό). */
 export function resolvePresetId(choice, capabilities) {
@@ -32,9 +33,9 @@ export function selectLocalModel(choice, capabilities) {
   if (!preset) return null;
   const { variants } = preset;
   let variant = null;
-  let device = 'wasm';
-  if (capabilities.webgpu && capabilities.shaderF16 && variants.webgpuShaderF16) { variant = variants.webgpuShaderF16; device = 'webgpu'; }
-  else if (capabilities.webgpu && variants.webgpu) { variant = variants.webgpu; device = 'webgpu'; }
+  let device = INFERENCE_DEVICES.WASM;
+  if (capabilities.webgpu && capabilities.shaderF16 && variants.webgpuShaderF16) { variant = variants.webgpuShaderF16; device = INFERENCE_DEVICES.WEBGPU; }
+  else if (capabilities.webgpu && variants.webgpu) { variant = variants.webgpu; device = INFERENCE_DEVICES.WEBGPU; }
   else if (variants.wasm) variant = variants.wasm;
   if (!variant) return null;
   return { presetId: preset.id, repo: preset.repo, device, dtype: { ...variant.dtype }, approxDownloadMb: variant.approxDownloadMb };

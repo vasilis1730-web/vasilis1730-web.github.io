@@ -5,6 +5,7 @@
  */
 
 import { PCM_SAMPLE_RATE } from '../../domain/audio/pcm.js';
+import { INFERENCE_DEVICES } from './worker-protocol.js';
 
 /** Τμήματα μικρότερα από αυτό δεν δίνουν αξιόπιστο αποτύπωμα (s). */
 export const MIN_EMBEDDING_SEC = 1;
@@ -27,7 +28,7 @@ export class SpeakerEmbedder {
    */
   static async load(transformers, model, progressCallback) {
     const processor = await transformers.AutoProcessor.from_pretrained(model.repo, { progress_callback: progressCallback });
-    const network = await transformers.AutoModel.from_pretrained(model.repo, { dtype: model.dtype, device: 'wasm', progress_callback: progressCallback });
+    const network = await transformers.AutoModel.from_pretrained(model.repo, { dtype: model.dtype, device: INFERENCE_DEVICES.WASM, progress_callback: progressCallback });
     return new SpeakerEmbedder(processor, network);
   }
 

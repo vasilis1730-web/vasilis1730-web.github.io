@@ -38,7 +38,7 @@ deploy στο `main` φτάνει αμέσως και στα κινητά**. Ν�
 | `android/apomagnitofonisi/` | Το project του Bubblewrap 1.25.0 με τις διορθώσεις της §9 (σχόλια `ΑΠΟΜΑΓΝΗΤΟΦΩΝΗΣΗ:`) |
 | `android/apomagnitofonisi/twa-manifest.json` | Μοναδική πηγή για package, host, χρώματα, share target και αποτυπώματα |
 | `tools/android/` | `project.mjs` (διαδρομές, twa-manifest), `asset-links.mjs` (το assetlinks.json του build), `play-version.mjs` (versionCode), `apk-inspection.mjs` (έλεγχος APK: package, targetSdk, δικαιώματα, host, share target) |
-| `tools/android.mjs` | Οι εντολές `version`, `inspect` και `release` (υπογραφή, επαλήθευση, σύνοψη) με τα εργαλεία του Android SDK. Το versionCode δίνεται σε όλες με την ίδια παράμετρο `--version-code`, και κάθε εντολή απορρίπτει όποια παράμετρο δεν είναι δική της |
+| `tools/android.mjs` | Οι εντολές `version`, `inspect` και `release` (υπογραφή, επαλήθευση, σύνοψη) με τα εργαλεία του Android SDK. Το versionCode δίνεται σε όλες με την ίδια παράμετρο `--version-code` και ελέγχεται μία φορά, πριν από κάθε δουλειά (ακέραιος από 1 έως 2.100.000.000, υποχρεωτικός στο `release`). Κάθε εντολή απορρίπτει όποια παράμετρο δεν είναι δική της |
 | `.github/workflows/android.yml` | Χειροκίνητο, μόνο από το `main`: tests → έκδοση → Gradle → υπογραφή → artifact 30 ημερών |
 | `.github/workflows/test.yml` (job `android`) | Build χωρίς υπογραφή σε κάθε push, `inspect`, και έλεγχος ότι το build δεν αφήνει αλλαγές |
 | `tests/infra/android.test.mjs` | Συνέπεια με το web manifest, Gradle wrapper, αποτυπώματα, κανένα κλειδί στο repository |

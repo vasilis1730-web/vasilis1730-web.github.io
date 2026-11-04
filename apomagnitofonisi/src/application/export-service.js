@@ -24,7 +24,7 @@ export class ExportService {
    * @param {Object} deps
    * @param {import('./ports.js').TranscriptExporter[]} deps.transcriptExporters
    * @param {import('./ports.js').SummaryExporter[]} deps.summaryExporters
-   * @param {(kind: string) => string} deps.summaryFileSuffixFor  π.χ. 'minutes' → «Πρακτικά»
+   * @param {(kind: import('./ports.js').SummaryKind) => string} deps.summaryFileSuffixFor  π.χ. 'minutes' → «Πρακτικά»
    * @param {string} deps.untitledFileName  όνομα αρχείου όταν η μεταγραφή δεν έχει τίτλο
    */
   constructor({ transcriptExporters, summaryExporters, summaryFileSuffixFor, untitledFileName }) {
@@ -75,7 +75,7 @@ export class ExportService {
   }
 
   /** Η μεταγραφή ως απλό κείμενο για το πρόχειρο (με χρόνους και ομιλητές). */
-  clipboardText(transcript) {
+  exportClipboardText(transcript) {
     const data = this.exportTranscript(transcript, EXPORT_FORMATS.TXT).data;
     if (typeof data !== 'string') throw new TypeError('ο εξαγωγέας κειμένου πρέπει να επιστρέφει κείμενο');
     return data;
