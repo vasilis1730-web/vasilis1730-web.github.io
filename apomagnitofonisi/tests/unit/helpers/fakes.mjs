@@ -1,4 +1,4 @@
-/** Ψεύτικοι adapters για τα unit tests του application. */
+/** Ψεύτικοι adapters για τα unit tests του application (ίδια συμβόλαια με το src/application/ports.js). */
 export class MemoryRepository {
   constructor() { this.items = new Map(); this.saves = 0; }
   async save(t) { this.saves += 1; this.items.set(t.id, structuredClone(t)); }
@@ -10,7 +10,7 @@ export class MemoryRepository {
     }));
   }
   async remove(id) { this.items.delete(id); }
-  async removeAll() { this.items.clear(); }
+  async clear() { this.items.clear(); }
 }
 
 export function fixedClock(iso = '2026-11-04T10:00:00.000Z') {
@@ -23,13 +23,15 @@ export function sequentialIds(prefix = 'id') {
 }
 
 export class FakeEngine {
-  constructor(kind, result, { available = true, reason } = {}) {
+  constructor(kind, result, { available = true, reason, qualityPresets } = {}) {
     this.kind = kind;
     this.result = result;
     this.availability = { available, ...(reason ? { reason } : {}) };
+    this.availabilityRequests = [];
     this.requests = [];
+    if (qualityPresets) this.describeQualityPresets = async () => qualityPresets;
   }
-  async checkAvailability() { return this.availability; }
+  async checkAvailability(options) { this.availabilityRequests.push(options); return this.availability; }
   async recognize(request) {
     this.requests.push(request);
     request.onProgress?.({ stage: 'transcribing', fraction: 0.5 });
@@ -46,13 +48,20 @@ export class MemorySettingsStore {
 }
 
 export class MemoryKeyStore {
-  constructor() { this.keys = new Map(); this.persistent = true; }
+  constructor() { this.keys = new Map(); this.retention = 'device'; }
   getKey(p) { return this.keys.get(p) ?? null; }
   setKey(p, k) { this.keys.set(p, k); }
   removeKey(p) { this.keys.delete(p); }
-  setPersistent(v) { this.persistent = v; }
-  isPersistent() { return this.persistent; }
-  clearAll() { this.keys.clear(); }
+  setKeyRetention(retention) { this.retention = retention; }
+  keyRetention() { return this.retention; }
+  clear() { this.keys.clear(); this.retention = 'device'; }
+}
+
+/** Θύρα DeviceStorage: μετρά τα αιτήματα μόνιμης αποθήκευσης. */
+export class MemoryDeviceStorage {
+  constructor(usage = { usageBytes: 5, quotaBytes: 10 }) { this.usage = usage; this.persistenceRequests = 0; }
+  async estimateUsage() { return this.usage; }
+  async requestPersistence() { this.persistenceRequests += 1; return true; }
 }
 
 export function fakeMedia({ name = 'Σύσκεψη.mp3', type = 'audio/mpeg', size = 1234 } = {}) {

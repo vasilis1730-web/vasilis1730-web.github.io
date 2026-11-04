@@ -1,18 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { TranscriptionService } from '../../../src/application/transcription-service.js';
-import { AppError, ERROR_CODES } from '../../../src/application/errors.js';
-import { MemoryRepository, fixedClock, sequentialIds, FakeEngine, fakeMedia } from '../helpers/fakes.mjs';
+import { AppError, ERROR_CODES, INPUT_ISSUES } from '../../../src/application/errors.js';
+import { MemoryRepository, MemoryDeviceStorage, fixedClock, sequentialIds, FakeEngine, fakeMedia } from '../helpers/fakes.mjs';
 
 const ANO = String.fromCharCode(0x387);
 const options = { languageCode: 'el', diarize: true, expectedSpeakers: null };
 const textOptions = { removeAnoTeleia: true };
 
 function service(engine, repository = new MemoryRepository()) {
-  const storage = { requested: 0, async requestPersistence() { this.requested += 1; return true; }, async estimate() { return {}; } };
+  const deviceStorage = new MemoryDeviceStorage();
+  const engines = Array.isArray(engine) ? engine : [engine];
   return {
-    repository, storage,
-    service: new TranscriptionService({ engines: [engine], repository, clock: fixedClock(), idGenerator: sequentialIds('t'), speakerLabel: n => `Ομιλητής ${n}`, storage }),
+    repository, deviceStorage,
+    service: new TranscriptionService({ engines, repository, clock: fixedClock(), idGenerator: sequentialIds('t'), speakerLabelFor: n => `Ομιλητής ${n}`, deviceStorage }),
   };
 }
 
@@ -25,7 +26,7 @@ test('μεταγραφή: καθαρό κείμενο, ομιλητές με σ�
     ],
     languageCode: 'el', durationSec: 6, model: 'scribe_v2',
   });
-  const { service: s, repository, storage } = service(engine);
+  const { service: s, repository, deviceStorage } = service(engine);
   const progress = [];
   const t = await s.transcribe({ media: fakeMedia(), engineKind: 'elevenlabs', options, textOptions, onProgress: p => progress.push(p.stage) });
   assert.equal(t.id, 't-1');
@@ -37,8 +38,10 @@ test('μεταγραφή: καθαρό κείμενο, ομιλητές με σ�
   assert.equal(t.source.durationSec, 6);
   assert.deepEqual(progress, ['transcribing', 'saving']);
   assert.equal(repository.saves, 1);
-  assert.equal(storage.requested, 1);
+  assert.equal(deviceStorage.persistenceRequests, 1, 'ζητείται να μη σβήσει ο browser τα δεδομένα');
   assert.equal(engine.requests[0].options, options);
+  assert.equal(engine.availabilityRequests[0], options, 'η διαθεσιμότητα ελέγχεται με τις ίδιες επιλογές');
+  assert.deepEqual(await repository.findById('t-1'), t);
 });
 
 test('χωρίς ομιλητές και με «αυτόματη» γλώσσα: languageCode null όταν δεν το δίνει η μηχανή', async () => {
@@ -51,14 +54,19 @@ test('χωρίς ομιλητές και με «αυτόματη» γλώσσα:
   assert.equal(t.segments[0].text, 'ναι');
 });
 
-test('άκυρα αιτήματα', async () => {
-  const { service: s } = service(new FakeEngine('local', { segments: [], model: 'm' }));
-  const reject = (job, code) => assert.rejects(s.transcribe({ media: fakeMedia(), engineKind: 'local', options, textOptions, ...job }), e => e instanceof AppError && e.code === code);
-  await reject({ media: fakeMedia({ size: 0 }) }, ERROR_CODES.INVALID_INPUT);
-  await reject({ options: { ...options, languageCode: 'xx' } }, ERROR_CODES.INVALID_INPUT);
-  await reject({ options: { ...options, expectedSpeakers: 40 } }, ERROR_CODES.INVALID_INPUT);
-  await reject({ engineKind: 'whatever' }, ERROR_CODES.INVALID_INPUT);
-  await reject({ textOptions: undefined }, ERROR_CODES.INVALID_INPUT);
+test('άκυρα αιτήματα: το κενό αρχείο το διορθώνει ο χρήστης, τα υπόλοιπα είναι λάθη του κώδικα', async () => {
+  const engine = new FakeEngine('local', { segments: [], model: 'm' });
+  const { service: s, repository } = service(engine);
+  const request = job => s.transcribe({ media: fakeMedia(), engineKind: 'local', options, textOptions, ...job });
+  await assert.rejects(request({ media: fakeMedia({ size: 0 }) }), e => e instanceof AppError && e.code === ERROR_CODES.INVALID_INPUT && e.details.reason === INPUT_ISSUES.EMPTY_FILE);
+  await assert.rejects(request({ media: undefined }), TypeError);
+  await assert.rejects(request({ options: { ...options, languageCode: 'xx' } }), RangeError);
+  await assert.rejects(request({ options: { ...options, expectedSpeakers: 40 } }), RangeError);
+  await assert.rejects(request({ options: { ...options, expectedSpeakers: 1.5 } }), RangeError);
+  await assert.rejects(request({ engineKind: 'whatever' }), RangeError);
+  await assert.rejects(request({ textOptions: undefined }), TypeError);
+  assert.equal(engine.requests.length, 0, 'κανένα άκυρο αίτημα δεν φτάνει στη μηχανή');
+  assert.equal(repository.saves, 0);
 });
 
 test('μη διαθέσιμη μηχανή, σφάλματα μηχανής και ακύρωση', async () => {
@@ -76,8 +84,17 @@ test('μη διαθέσιμη μηχανή, σφάλματα μηχανής κα
   assert.equal(repository.saves, 0, 'τίποτα δεν αποθηκεύεται μετά από ακύρωση');
 });
 
-test('διαθεσιμότητα και λίστα μηχανών', async () => {
-  const { service: s } = service(new FakeEngine('local', { segments: [] }));
-  assert.deepEqual(s.engineKinds, ['local']);
-  assert.deepEqual(await s.checkAvailability('local'), { available: true });
+test('διαθεσιμότητα, λίστα μηχανών και επίπεδα ποιότητας', async () => {
+  const presets = { accelerated: false, autoPresetId: 'fast', presets: [{ id: 'fast', available: true, approxDownloadMb: 77 }] };
+  const local = new FakeEngine('local', { segments: [] }, { qualityPresets: presets });
+  const cloud = new FakeEngine('elevenlabs', { segments: [] }, { available: false, reason: ERROR_CODES.KEY_MISSING });
+  const { service: s } = service([local, cloud]);
+  assert.deepEqual(s.engineKinds, ['local', 'elevenlabs'], 'με τη σειρά που δόθηκαν');
+  assert.deepEqual(await s.checkAvailability('local', { ...options, localQualityPreset: 'fast' }), { available: true });
+  assert.equal(local.availabilityRequests[0].localQualityPreset, 'fast');
+  assert.deepEqual(await s.checkAvailability('elevenlabs'), { available: false, reason: ERROR_CODES.KEY_MISSING });
+  assert.deepEqual(await s.describeQualityPresets('local'), presets);
+  assert.equal(await s.describeQualityPresets('elevenlabs'), null, 'μηχανή χωρίς επίπεδα ποιότητας');
+  await assert.rejects(s.checkAvailability('whatever'), RangeError);
+  await assert.rejects(s.describeQualityPresets('whatever'), RangeError);
 });

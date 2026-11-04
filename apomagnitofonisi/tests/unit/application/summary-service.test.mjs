@@ -2,9 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { SummaryService } from '../../../src/application/summary-service.js';
 import { SUMMARY_SYSTEM_PROMPT, buildSummaryInstruction, formatTranscriptForPrompt } from '../../../src/application/summary-prompts.js';
-import { estimateSummaryCost, estimateTokens } from '../../../src/application/cost-estimate.js';
-import { ERROR_CODES } from '../../../src/application/errors.js';
-import { createTranscript } from '../../../src/domain/transcript.js';
+import { estimateSummaryCost, estimateTokens, EXPECTED_OUTPUT_TOKENS } from '../../../src/application/cost-estimate.js';
+import { ERROR_CODES, INPUT_ISSUES } from '../../../src/application/errors.js';
+import { createTranscript, SUMMARY_KINDS } from '../../../src/domain/transcript.js';
 import { MemoryRepository, fixedClock, sequentialIds } from '../helpers/fakes.mjs';
 
 const transcript = createTranscript({
@@ -25,12 +25,23 @@ test('το prompt: γραμμές με χρόνο και όνομα, και οδ
   assert.match(text, /\[01:01:40\] Άγνωστος ομιλητής: Τέλος\./);
   assert.match(buildSummaryInstruction('minutes'), /## Αποφάσεις/);
   assert.match(buildSummaryInstruction('custom', ' Μόνο τα οικονομικά. '), /Μόνο τα οικονομικά\.$/);
-  assert.throws(() => buildSummaryInstruction('custom', '  '), RangeError);
-  assert.throws(() => buildSummaryInstruction('poem'), RangeError);
+  assert.throws(() => buildSummaryInstruction('custom', '  '), e => e.code === ERROR_CODES.INVALID_INPUT && e.details.reason === INPUT_ISSUES.EMPTY_INSTRUCTION, 'κενή οδηγία: τη διορθώνει ο χρήστης');
+  assert.throws(() => buildSummaryInstruction('poem'), RangeError, 'άγνωστο είδος: λάθος του κώδικα');
+  const untitled = formatTranscriptForPrompt({ ...transcript, title: '' }, { unknownSpeaker: '?' });
+  assert.doesNotMatch(untitled, /Τίτλος:/, 'χωρίς τίτλο, χωρίς γραμμή τίτλου');
   assert.match(SUMMARY_SYSTEM_PROMPT, /άνω τελεία/);
   for (const t of [SUMMARY_SYSTEM_PROMPT, buildSummaryInstruction('brief'), buildSummaryInstruction('minutes'), buildSummaryInstruction('actions')]) {
     assert.doesNotMatch(t, new RegExp(`[${String.fromCharCode(0x387, 0xb7)}]`));
   }
+});
+
+test('κάθε είδος περίληψης έχει οδηγία και αναμενόμενο μήκος απάντησης', () => {
+  for (const kind of Object.values(SUMMARY_KINDS)) {
+    assert.ok(buildSummaryInstruction(kind, 'Οδηγία.').length > 10, kind);
+    assert.ok(EXPECTED_OUTPUT_TOKENS[kind] > 0, kind);
+  }
+  assert.deepEqual(Object.keys(EXPECTED_OUTPUT_TOKENS).sort(), Object.values(SUMMARY_KINDS).sort());
+  assert.throws(() => estimateSummaryCost({ inputTokens: 1, kind: 'poem', pricing: { inputUsdPerMTok: 1, outputUsdPerMTok: 1 } }), RangeError);
 });
 
 test('εκτίμηση κόστους, και η υψηλότερη τιμή του Haiku πάνω από 100K tokens', () => {
@@ -49,16 +60,17 @@ test('περίληψη: στέλνει prompt, μεταφέρει το κείμ�
       requests.push(request);
       request.onText?.('## Περίληψη\n');
       request.onText?.('Έγινε συνεδρίαση.');
-      return { text: '## Περίληψη\nΈγινε συνεδρίαση.', model: 'claude-opus-5-5', truncated: true };
+      return { text: '## Περίληψη\nΈγινε συνεδρίαση.', modelId: 'claude-opus-5-5', truncated: true, restarted: false };
     },
   };
   const repository = new MemoryRepository();
   const service = new SummaryService({ summarizer, repository, clock: fixedClock('2026-11-04T12:00:00.000Z'), idGenerator: sequentialIds('s'), unknownSpeakerLabel: 'Άγνωστος ομιλητής' });
   const streamed = [];
-  const { transcript: updated, summary } = await service.summarize(transcript, { kind: 'brief', modelId: 'claude-opus-5-5', onText: d => streamed.push(d) });
+  const { transcript: updated, summary, restarted } = await service.summarize(transcript, { kind: 'brief', modelId: 'claude-opus-5-5', onText: d => streamed.push(d) });
+  assert.equal(restarted, false);
   assert.equal(streamed.join(''), '## Περίληψη\nΈγινε συνεδρίαση.');
   assert.equal(requests[0].systemPrompt, SUMMARY_SYSTEM_PROMPT);
-  assert.equal(requests[0].model, 'claude-opus-5-5');
+  assert.equal(requests[0].modelId, 'claude-opus-5-5');
   assert.match(requests[0].transcriptText, /Πρόεδρος: Καλημέρα/);
   assert.deepEqual(summary, { id: 's-1', kind: 'brief', model: 'claude-opus-5-5', createdAt: '2026-11-04T12:00:00.000Z', text: '## Περίληψη\nΈγινε συνεδρίαση.', truncated: true });
   assert.equal(updated.summaries[0].id, 's-1');
@@ -67,13 +79,29 @@ test('περίληψη: στέλνει prompt, μεταφέρει το κείμ�
   assert.ok(cost.usd > 0 && cost.inputTokens > 50);
 });
 
-test('περίληψη: άγνωστο μοντέλο, κενή οδηγία και σφάλμα παρόχου', async () => {
+test('περίληψη: εφεδρικό μοντέλο, και η οδηγία του χρήστη αποθηκεύεται', async () => {
+  const summarizer = { async summarize(request) { request.onRestart?.(); return { text: 'Κείμενο.', modelId: 'claude-opus-4-8', truncated: false, restarted: true }; } };
+  const service = new SummaryService({ summarizer, repository: new MemoryRepository(), clock: fixedClock(), idGenerator: sequentialIds('s'), unknownSpeakerLabel: '?' });
+  let restarts = 0;
+  const outcome = await service.summarize(transcript, { kind: 'custom', customInstruction: '  Μόνο τα οικονομικά. ', modelId: 'claude-opus-5-5', onRestart: () => { restarts += 1; } });
+  assert.equal(restarts, 1);
+  assert.equal(outcome.restarted, true);
+  assert.equal(outcome.summary.model, 'claude-opus-4-8', 'το μοντέλο που απάντησε τελικά');
+  assert.equal(outcome.summary.instruction, 'Μόνο τα οικονομικά.');
+  assert.equal('truncated' in outcome.summary, false);
+});
+
+test('περίληψη: άγνωστο μοντέλο, κενή οδηγία, κενή μεταγραφή και σφάλμα παρόχου', async () => {
+  let calls = 0;
   const service = new SummaryService({
-    summarizer: { async summarize() { throw Object.assign(new Error('x'), { name: 'AbortError' }); } },
+    summarizer: { async summarize() { calls += 1; throw Object.assign(new Error('x'), { name: 'AbortError' }); } },
     repository: new MemoryRepository(), clock: fixedClock(), idGenerator: sequentialIds(), unknownSpeakerLabel: '?',
   });
-  await assert.rejects(service.summarize(transcript, { kind: 'brief', modelId: 'gpt' }), e => e.code === ERROR_CODES.INVALID_INPUT);
-  await assert.rejects(service.summarize(transcript, { kind: 'custom', customInstruction: '', modelId: 'claude-opus-5-5' }), e => e.code === ERROR_CODES.INVALID_INPUT);
+  await assert.rejects(service.summarize(transcript, { kind: 'brief', modelId: 'gpt' }), RangeError, 'άγνωστο μοντέλο: λάθος του κώδικα');
+  assert.throws(() => service.estimateCost(transcript, { kind: 'brief', modelId: 'gpt' }), RangeError);
+  await assert.rejects(service.summarize(transcript, { kind: 'custom', customInstruction: '', modelId: 'claude-opus-5-5' }), e => e.code === ERROR_CODES.INVALID_INPUT && e.details.reason === INPUT_ISSUES.EMPTY_INSTRUCTION);
+  await assert.rejects(service.summarize({ ...transcript, segments: [] }, { kind: 'brief', modelId: 'claude-opus-5-5' }), e => e.code === ERROR_CODES.EMPTY_TRANSCRIPT);
+  assert.equal(calls, 0, 'τίποτα δεν στέλνεται στον πάροχο');
   await assert.rejects(service.summarize(transcript, { kind: 'brief', modelId: 'claude-opus-5-5' }), e => e.code === ERROR_CODES.CANCELLED);
   assert.equal(service.estimateCost(transcript, { kind: 'custom', customInstruction: '', modelId: 'claude-opus-5-5' }).outputTokens, 2500);
 });

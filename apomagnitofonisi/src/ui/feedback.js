@@ -4,7 +4,7 @@
  * παρόχου. Οι ακυρώσεις από τον χρήστη δεν δείχνουν σφάλμα.
  */
 import { STRINGS, errorMessage, providerMessage } from './strings.js';
-import { isCancellation } from '../application/errors.js';
+import { isAppError, isCancellation } from '../application/errors.js';
 
 /** Μήνυμα σφάλματος με το μήνυμα του παρόχου, όπου υπάρχει, και τα μέρη που έμειναν στη διαγραφή. */
 export function describeError(error) {
@@ -33,7 +33,8 @@ export async function runAction(toasts, action, { success } = {}) {
     return result;
   } catch (error) {
     if (!isCancellation(error)) {
-      if (!(error && error.code)) console.error(error);
+      // Ό,τι δεν είναι AppError είναι λάθος του κώδικα: φαίνεται και στην κονσόλα.
+      if (!isAppError(error)) console.error(error);
       toasts.show(describeError(error), { tone: 'error' });
     }
     return undefined;

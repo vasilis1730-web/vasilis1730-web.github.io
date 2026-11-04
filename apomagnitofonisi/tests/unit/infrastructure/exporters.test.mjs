@@ -127,3 +127,17 @@ test('JSON: ξαναδιαβάζεται χωρίς απώλειες, και Mar
   assert.match(md, /^# Πρακτικά: Σύσκεψη/);
   assert.match(md, /Συντάχθηκε αυτόματα/);
 });
+
+test('χωρίς τίτλο: τα έγγραφα γράφουν την ετικέτα της διεπαφής', () => {
+  const untitled = addSummary(createTranscript({
+    id: 't2', title: '', createdAt: '2026-11-04T09:00:00.000Z',
+    source: { fileName: '', mimeType: 'audio/mp4', sizeBytes: 1, durationSec: 5 },
+    languageCode: 'el', engine: { kind: 'local', model: 'whisper' }, speakers: [],
+    segments: [{ id: 'seg-1', start: 0, end: 2, speakerId: null, text: 'Δοκιμή.' }],
+  }), { id: 's1', kind: 'brief', model: 'm', createdAt: '2026-11-04T10:00:00.000Z', text: 'Κείμενο.' }, '2026-11-04T10:00:00.000Z');
+  assert.equal(untitled.title, '');
+  assert.match(new TxtTranscriptExporter({ labels: testLabels }).render(untitled), /^Μεταγραφή χωρίς τίτλο\r\n/);
+  assert.match(new MarkdownSummaryExporter({ labels: testLabels }).render(untitled, untitled.summaries[0]), /^# Περίληψη: Μεταγραφή χωρίς τίτλο/);
+  const document = readZip(new DocxTranscriptExporter({ labels: testLabels }).render(untitled)).get('word/document.xml');
+  assert.match(document, /<w:t xml:space="preserve">Μεταγραφή χωρίς τίτλο<\/w:t>/);
+});

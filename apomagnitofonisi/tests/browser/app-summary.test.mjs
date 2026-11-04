@@ -78,6 +78,17 @@ test('Claude: πρακτικά με ροή κειμένου, αποθήκευσ�
     const document = readStoredZip(fs.readFileSync(await download.path())).get('word/document.xml');
     assert.match(document, /Πρακτικά συνεδρίασης: Συνεδρίαση επιτροπής/);
     assert.match(document, /<w:tbl>/);
+
+    // «Διαγραφή όλων των δεδομένων»: μεταγραφές με τις περιλήψεις, κλειδιά και ρυθμίσεις.
+    await page.goto(`${base}/#/settings`);
+    await page.getByRole('button', { name: 'Διαγραφή όλων των δεδομένων' }).click();
+    await page.locator('dialog').getByRole('button', { name: 'Διαγραφή όλων των δεδομένων' }).click();
+    await page.getByText('Όλα τα δεδομένα διαγράφηκαν από τη συσκευή.').waitFor();
+    const stored = await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('apomagnitofonisi.')));
+    assert.deepEqual(stored, [], 'ούτε κλειδιά ούτε ρυθμίσεις στη συσκευή');
+    assert.equal(await page.getByText(/Αποθηκευμένο κλειδί που τελειώνει σε/).count(), 0);
+    await page.goto(`${base}/#/history`);
+    await page.getByText('Δεν υπάρχουν αποθηκευμένες μεταγραφές.').waitFor();
   }, { serviceWorkers: 'block' });
   assert.deepEqual(result.violations, [], 'καμία παραβίαση CSP');
   assert.deepEqual(result.errors, [], 'κανένα σφάλμα στη σελίδα');

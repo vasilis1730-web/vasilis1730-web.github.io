@@ -1,4 +1,4 @@
-/** Ετικέτες εξαγωγής για τα tests (ίδιας μορφής με του ui/strings.js). */
+/** Ετικέτες εξαγωγής για τα tests (θύρα ExportLabels, ίδιας μορφής με του ui/presentation.js). */
 export const testLabels = {
   appName: 'Απομαγνητοφώνηση',
   date: 'Ημερομηνία',
@@ -6,9 +6,10 @@ export const testLabels = {
   speakers: 'Ομιλητές',
   engine: 'Μεταγραφή',
   unknownSpeaker: 'Άγνωστος ομιλητής',
+  untitled: 'Μεταγραφή χωρίς τίτλο',
   transcriptNotice: 'Αυτόματη μεταγραφή, μπορεί να έχει λάθη.',
   summaryNotice: 'Συντάχθηκε αυτόματα από τη μεταγραφή.',
   formatDate: iso => iso.slice(0, 10),
   describeEngine: engine => `${engine.kind} ${engine.model}`,
-  summaryTitle: kind => ({ minutes: 'Πρακτικά', brief: 'Περίληψη' }[kind] || 'Σημειώσεις'),
+  summaryTitleFor: kind => ({ minutes: 'Πρακτικά', brief: 'Περίληψη' }[kind] || 'Σημειώσεις'),
 };
