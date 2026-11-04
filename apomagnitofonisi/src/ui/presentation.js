@@ -1,19 +1,29 @@
 /**
  * Κείμενα παρουσίασης που χρειάζονται και έξω από τις προβολές (εξαγωγείς,
- * υπηρεσίες): περιγραφή μηχανής και οι ετικέτες των εγγράφων.
+ * υπηρεσίες): περιγραφή μηχανής και οι ετικέτες των εγγράφων (θύρα ExportLabels).
  */
 import { STRINGS } from './strings.js';
 import { formatDateTime } from './formatters.js';
-import { ENGINE_KINDS } from '../domain/transcript.js';
 
 /** «ElevenLabs Scribe (scribe_v2)» ή «Whisper στη συσκευή (whisper-base)». */
 export function describeEngine(engine) {
-  if (engine.kind === ENGINE_KINDS.ELEVENLABS) return STRINGS.documents.engineCloud(engine.model);
-  return STRINGS.documents.engineLocal(String(engine.model || '').split('/').pop());
+  const names = STRINGS.engines[engine.kind];
+  const model = String(engine.model || '').split('/').pop();
+  return names ? names.documentName(model) : `${engine.kind} (${model})`;
 }
 
-/** @returns {import('../infrastructure/export/export-labels.js').ExportLabels} */
-export function exportLabels() {
+/** Η σύντομη ονομασία μιας μηχανής, π.χ. «Στη συσκευή» (CA-008: χωρίς ternaries ανά μηχανή). */
+export function engineShortName(kind) {
+  return STRINGS.engines[kind] ? STRINGS.engines[kind].short : kind;
+}
+
+/** Ο τίτλος μιας μεταγραφής για εμφάνιση (κενός τίτλος → «Μεταγραφή χωρίς τίτλο»). */
+export function displayTitle(transcriptOrItem) {
+  return transcriptOrItem.title || STRINGS.transcript.untitled;
+}
+
+/** @returns {import('../application/ports.js').ExportLabels} */
+export function createExportLabels() {
   return Object.freeze({
     appName: STRINGS.appName,
     date: STRINGS.documents.date,
@@ -21,10 +31,16 @@ export function exportLabels() {
     speakers: STRINGS.transcript.speakers,
     engine: STRINGS.documents.engine,
     unknownSpeaker: STRINGS.transcript.unknownSpeaker,
+    untitled: STRINGS.transcript.untitled,
     transcriptNotice: STRINGS.documents.transcriptNotice,
     summaryNotice: STRINGS.summary.notice,
     formatDate: formatDateTime,
     describeEngine,
-    summaryTitle: kind => STRINGS.summary.kinds[kind] || STRINGS.summary.title,
+    summaryTitleFor: kind => STRINGS.summary.kinds[kind] || STRINGS.summary.title,
   });
+}
+
+/** Η κατάληξη του ονόματος αρχείου μιας περίληψης, π.χ. 'minutes' → «Πρακτικά». */
+export function summaryFileSuffixFor(kind) {
+  return STRINGS.summary.fileSuffix[kind] || STRINGS.summary.fileSuffix.custom;
 }

@@ -1,11 +1,11 @@
 /**
  * Τα μοντέλα που κατέβηκαν στη συσκευή (το Transformers.js τα κρατά στην
  * Cache Storage «transformers-cache», το ONNX Runtime τα .wasm του στην ίδια).
- * Μέγεθος και διαγραφή, για τις Ρυθμίσεις.
+ * Μέγεθος και διαγραφή, για τις Ρυθμίσεις. Υλοποιεί τη θύρα ModelCache.
  */
 export const MODEL_CACHE_NAMES = Object.freeze(['transformers-cache']);
 
-export class ModelCacheManager {
+export class ModelCache {
   #caches;
 
   /** @param {{ caches: CacheStorage|undefined }} deps */
@@ -13,8 +13,8 @@ export class ModelCacheManager {
     this.#caches = caches;
   }
 
-  /** Το άθροισμα των Content-Length των αποθηκευμένων αρχείων (byte), ή null. */
-  async sizeBytes() {
+  /** Το άθροισμα των Content-Length των αποθηκευμένων αρχείων (byte), ή null χωρίς Cache Storage. */
+  async estimateSizeBytes() {
     if (!this.#caches) return null;
     let total = 0;
     for (const name of MODEL_CACHE_NAMES) {

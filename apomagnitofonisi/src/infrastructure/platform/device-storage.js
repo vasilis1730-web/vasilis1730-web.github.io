@@ -1,9 +1,9 @@
 /**
  * Ο χώρος που χρησιμοποιεί η εφαρμογή στη συσκευή (μεταγραφές, μοντέλα) και
  * αίτημα να μη σβήνει ο browser τα δεδομένα όταν γεμίσει ο δίσκος.
- * Υλοποιεί τη θύρα StorageEstimator.
+ * Υλοποιεί τη θύρα DeviceStorage.
  */
-export class BrowserStorageEstimator {
+export class BrowserDeviceStorage {
   #manager;
 
   /** @param {{ storageManager: StorageManager|undefined }} deps */
@@ -11,7 +11,8 @@ export class BrowserStorageEstimator {
     this.#manager = storageManager;
   }
 
-  async estimate() {
+  /** @returns {Promise<import('../../application/ports.js').StorageUsage>} */
+  async estimateUsage() {
     if (!this.#manager || !this.#manager.estimate) return { usageBytes: null, quotaBytes: null };
     try {
       const { usage, quota } = await this.#manager.estimate();

@@ -7,12 +7,13 @@ import { buildSubtitleCues } from '../../domain/subtitles.js';
 import { formatClock, formatSrtTimestamp, formatVttTimestamp } from '../../domain/time-format.js';
 import { serializeTranscript } from '../../domain/transcript-codec.js';
 import { findSpeaker } from '../../domain/transcript.js';
-import { transcriptFacts, speakerNameOf } from './export-labels.js';
+import { EXPORT_FORMATS } from '../../application/export-formats.js';
+import { transcriptFacts, speakerNameOf, summaryHeading, titleOf } from './export-labels.js';
 
 const TEXT_MIME = 'text/plain;charset=utf-8';
 
 export class TxtTranscriptExporter {
-  format = 'txt';
+  format = EXPORT_FORMATS.TXT;
   extension = 'txt';
   mimeType = TEXT_MIME;
 
@@ -22,7 +23,7 @@ export class TxtTranscriptExporter {
   }
 
   render(transcript) {
-    const lines = [transcript.title, ''];
+    const lines = [titleOf(transcript, this.labels), ''];
     for (const fact of transcriptFacts(transcript, this.labels)) lines.push(`${fact.label}: ${fact.value}`);
     lines.push('', this.labels.transcriptNotice, '');
     for (const segment of transcript.segments) {
@@ -34,7 +35,7 @@ export class TxtTranscriptExporter {
 }
 
 export class SrtTranscriptExporter {
-  format = 'srt';
+  format = EXPORT_FORMATS.SRT;
   extension = 'srt';
   mimeType = 'application/x-subrip;charset=utf-8';
 
@@ -46,7 +47,7 @@ export class SrtTranscriptExporter {
 }
 
 export class VttTranscriptExporter {
-  format = 'vtt';
+  format = EXPORT_FORMATS.VTT;
   extension = 'vtt';
   mimeType = 'text/vtt;charset=utf-8';
 
@@ -61,7 +62,7 @@ export class VttTranscriptExporter {
 }
 
 export class JsonTranscriptExporter {
-  format = 'json';
+  format = EXPORT_FORMATS.JSON;
   extension = 'json';
   mimeType = 'application/json';
 
@@ -78,7 +79,7 @@ export class JsonTranscriptExporter {
 
 /** Η περίληψη όπως την έγραψε το μοντέλο (Markdown), με τίτλο και σημείωση. */
 export class MarkdownSummaryExporter {
-  format = 'txt';
+  format = EXPORT_FORMATS.TXT;
   extension = 'txt';
   mimeType = TEXT_MIME;
 
@@ -88,7 +89,7 @@ export class MarkdownSummaryExporter {
   }
 
   render(transcript, summary) {
-    const header = `# ${this.labels.summaryTitle(summary.kind)}: ${transcript.title}`;
+    const header = `# ${summaryHeading(transcript, summary, this.labels)}`;
     return `${header}\r\n\r\n${summary.text.replace(/\r?\n/g, '\r\n')}\r\n\r\n${this.labels.summaryNotice}\r\n`;
   }
 }

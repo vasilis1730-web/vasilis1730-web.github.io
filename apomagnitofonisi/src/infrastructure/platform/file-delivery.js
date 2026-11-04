@@ -1,8 +1,11 @@
 /**
  * Παράδοση αρχείων στον χρήστη: λήψη (a[download] με object URL) ή κοινή
  * χρήση (Web Share API με αρχεία, π.χ. στο Viber ή στο email από κινητό).
+ * Υλοποιεί τη θύρα FileDelivery.
  */
-export class BrowserFileSaver {
+import { AppError, ERROR_CODES } from '../../application/errors.js';
+
+export class BrowserFileDelivery {
   #document;
   #navigator;
   #url;
@@ -16,7 +19,7 @@ export class BrowserFileSaver {
 
   /** @param {import('../../application/ports.js').ExportFile} file */
   download(file) {
-    const blob = toBlob(file);
+    const blob = new Blob([file.data], { type: file.mimeType });
     const href = this.#url.createObjectURL(blob);
     const anchor = this.#document.createElement('a');
     anchor.href = href;
@@ -29,38 +32,40 @@ export class BrowserFileSaver {
     setTimeout(() => this.#url.revokeObjectURL(href), 60_000);
   }
 
-  /** Αληθές όταν η συσκευή μοιράζεται αρχεία αυτού του τύπου. */
-  canShare(file) {
+  /**
+   * Αν η συσκευή μοιράζεται αρχεία με αυτό το όνομα και τύπο. Ο έλεγχος γίνεται
+   * με κενό αρχείο ίδιου ονόματος και τύπου, χωρίς να φτιαχτεί το πραγματικό.
+   * @param {import('../../application/ports.js').FileMetadata} file
+   */
+  canShare({ fileName, mimeType }) {
     const nav = this.#navigator;
     if (!nav || typeof nav.share !== 'function' || typeof nav.canShare !== 'function') return false;
     try {
-      return nav.canShare({ files: [toFile(file)] });
+      return nav.canShare({ files: [new File([], fileName, { type: mimeType })] });
     } catch {
       return false;
     }
   }
 
-  /** @returns {Promise<boolean>} false όταν ο χρήστης ακύρωσε */
+  /**
+   * @param {import('../../application/ports.js').ExportFile} file
+   * @param {string} title
+   * @returns {Promise<void>} πετά AppError CANCELLED όταν ο χρήστης κλείσει το παράθυρο κοινής χρήσης
+   */
   async share(file, title) {
     try {
-      await this.#navigator.share({ files: [toFile(file)], title });
-      return true;
+      await this.#navigator.share({ files: [new File([file.data], file.fileName, { type: file.mimeType })], title });
     } catch (error) {
-      if (error && error.name === 'AbortError') return false;
-      throw error;
+      throw shareError(error);
     }
   }
+}
 
-  /** Αντιγραφή κειμένου στο πρόχειρο. */
-  async copyText(text) {
-    await this.#navigator.clipboard.writeText(text);
+function shareError(error) {
+  const name = error && error.name;
+  if (name === 'AbortError') return new AppError(ERROR_CODES.CANCELLED, 'ακυρώθηκε', { cause: error });
+  if (name === 'NotAllowedError' || name === 'DataError' || name === 'TypeError') {
+    return new AppError(ERROR_CODES.DEVICE_UNSUPPORTED, `η κοινή χρήση δεν επιτράπηκε (${name})`, { cause: error });
   }
-}
-
-function toBlob(file) {
-  return new Blob([file.data], { type: file.mimeType });
-}
-
-function toFile(file) {
-  return new File([file.data], file.fileName, { type: file.mimeType });
+  return new AppError(ERROR_CODES.UNKNOWN, error && error.message ? error.message : String(error), { cause: error });
 }

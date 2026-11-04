@@ -39,26 +39,30 @@ export class BrowserKeyStore {
     this.#write(storage, keys);
   }
 
-  isPersistent() {
-    return safeGet(this.#device, KEYS_MODE_STORAGE_KEY) !== MODE_SESSION;
+  /** @returns {import('../../application/ports.js').KeyRetention} */
+  keyRetention() {
+    return safeGet(this.#device, KEYS_MODE_STORAGE_KEY) === MODE_SESSION ? MODE_SESSION : MODE_DEVICE;
   }
 
-  setPersistent(persistent) {
-    if (persistent === this.isPersistent()) return;
+  /** @param {import('../../application/ports.js').KeyRetention} retention */
+  setKeyRetention(retention) {
+    if (retention === this.keyRetention()) return;
     const from = this.#active();
     const keys = this.#read(from);
-    safeSet(this.#device, KEYS_MODE_STORAGE_KEY, persistent ? MODE_DEVICE : MODE_SESSION);
+    safeSet(this.#device, KEYS_MODE_STORAGE_KEY, retention === MODE_SESSION ? MODE_SESSION : MODE_DEVICE);
     this.#write(this.#active(), keys);
     safeRemove(from, KEYS_STORAGE_KEY);
   }
 
-  clearAll() {
+  /** Διαγραφή των κλειδιών και της επιλογής διατήρησης (OO-002): δεν μένει τίποτα. */
+  clear() {
     safeRemove(this.#device, KEYS_STORAGE_KEY);
     safeRemove(this.#session, KEYS_STORAGE_KEY);
+    safeRemove(this.#device, KEYS_MODE_STORAGE_KEY);
   }
 
   #active() {
-    return this.isPersistent() ? this.#device : this.#session;
+    return this.keyRetention() === MODE_SESSION ? this.#session : this.#device;
   }
 
   #read(storage) {

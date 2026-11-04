@@ -3,15 +3,16 @@
  */
 import { parseMarkdown } from '../../domain/markdown.js';
 import { formatClock } from '../../domain/time-format.js';
+import { EXPORT_FORMATS } from '../../application/export-formats.js';
 import { buildDocx } from './docx-document.js';
-import { transcriptFacts, speakerNameOf } from './export-labels.js';
+import { transcriptFacts, speakerNameOf, summaryHeading, titleOf } from './export-labels.js';
 
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 const MUTED = '6B7280';
 
 /** Τίτλος, στοιχεία, ομιλητές, και μία παράγραφος ανά τμήμα (ομιλητής έντονα, χρόνος γκρι). */
 export class DocxTranscriptExporter {
-  format = 'docx';
+  format = EXPORT_FORMATS.DOCX;
   extension = 'docx';
   mimeType = DOCX_MIME;
 
@@ -21,8 +22,9 @@ export class DocxTranscriptExporter {
   }
 
   render(transcript) {
+    const title = titleOf(transcript, this.labels);
     const blocks = [
-      { kind: 'paragraph', style: 'Title', runs: [{ text: transcript.title }] },
+      { kind: 'paragraph', style: 'Title', runs: [{ text: title }] },
       ...transcriptFacts(transcript, this.labels).map(fact => ({
         kind: 'paragraph', style: 'Subtitle', runs: [{ text: `${fact.label}: `, bold: true }, { text: fact.value }],
       })),
@@ -35,13 +37,13 @@ export class DocxTranscriptExporter {
       runs.push({ text: segment.text });
       blocks.push({ kind: 'paragraph', runs });
     }
-    return buildDocx(blocks, { title: transcript.title, creator: this.labels.appName, createdAt: new Date(transcript.updatedAt) });
+    return buildDocx(blocks, { title, creator: this.labels.appName, createdAt: new Date(transcript.updatedAt) });
   }
 }
 
 /** Η περίληψη (Markdown) ως έγγραφο Word με επικεφαλίδες, λίστες και πίνακες. */
 export class DocxSummaryExporter {
-  format = 'docx';
+  format = EXPORT_FORMATS.DOCX;
   extension = 'docx';
   mimeType = DOCX_MIME;
 
@@ -51,7 +53,7 @@ export class DocxSummaryExporter {
   }
 
   render(transcript, summary) {
-    const title = `${this.labels.summaryTitle(summary.kind)}: ${transcript.title}`;
+    const title = summaryHeading(transcript, summary, this.labels);
     const blocks = [
       { kind: 'paragraph', style: 'Title', runs: [{ text: title }] },
       { kind: 'paragraph', style: 'Subtitle', runs: [{ text: `${this.labels.date}: `, bold: true }, { text: this.labels.formatDate(summary.createdAt) }] },

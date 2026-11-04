@@ -51,7 +51,8 @@ export class IndexedDbTranscriptRepository {
     await transactionDone(tx);
   }
 
-  async removeAll() {
+  /** Διαγραφή όλων των μεταγραφών. */
+  async clear() {
     const tx = (await this.#db()).transaction(STORE, 'readwrite');
     tx.objectStore(STORE).clear();
     await transactionDone(tx);

@@ -4,7 +4,7 @@
  * ακούνε τις αλλαγές (Observer). Η ίδια η μεταγραφή γίνεται από το
  * TranscriptionService.
  *
- * @typedef {'idle'|'running'|'done'|'failed'|'cancelled'} JobStatus
+ * @typedef {typeof JOB_STATUSES[keyof typeof JOB_STATUSES]} JobStatus
  *
  * @typedef {Object} JobState
  * @property {JobStatus} status
@@ -13,10 +13,21 @@
  * @property {{ start: number, end: number, text: string }[]} partialSegments
  * @property {import('../domain/transcript.js').Transcript|null} transcript
  * @property {import('../application/errors.js').AppError|null} error
+ *
+ * @typedef {Omit<import('../application/transcription-service.js').TranscriptionRequest, 'signal'|'onProgress'|'onPartialSegments'>} JobRequest
  */
 import { isCancellation, toAppError } from '../application/errors.js';
 
-const IDLE = Object.freeze({ status: 'idle', fileName: null, progress: null, partialSegments: [], transcript: null, error: null });
+/** Οι καταστάσεις μιας μεταγραφής (API-004). */
+export const JOB_STATUSES = Object.freeze({
+  IDLE: 'idle',
+  RUNNING: 'running',
+  DONE: 'done',
+  FAILED: 'failed',
+  CANCELLED: 'cancelled',
+});
+
+const IDLE = Object.freeze({ status: JOB_STATUSES.IDLE, fileName: null, progress: null, partialSegments: [], transcript: null, error: null });
 
 export class TranscriptionJob {
   #service;
@@ -27,7 +38,7 @@ export class TranscriptionJob {
 
   /**
    * @param {Object} deps
-   * @param {import('../application/transcription-service.js').TranscriptionService} deps.service
+   * @param {Pick<import('../application/transcription-service.js').TranscriptionService, 'transcribe'>} deps.service
    * @param {{ acquire: () => Promise<void>, release: () => Promise<void> }} deps.wakeLock
    */
   constructor({ service, wakeLock }) {
@@ -41,7 +52,7 @@ export class TranscriptionJob {
   }
 
   get isRunning() {
-    return this.#state.status === 'running';
+    return this.#state.status === JOB_STATUSES.RUNNING;
   }
 
   /** @returns {() => void} απεγγραφή */
@@ -52,30 +63,30 @@ export class TranscriptionJob {
   }
 
   /**
-   * @param {Omit<import('../application/transcription-service.js').TranscriptionJob, 'signal'|'onProgress'|'onPartialSegments'>} job
-   * @returns {Promise<import('../domain/transcript.js').Transcript|null>}
+   * @param {JobRequest} request
+   * @returns {Promise<JobState>} η τελική κατάσταση (done, failed ή cancelled)
    */
-  async start(job) {
+  async start(request) {
     if (this.isRunning) throw new Error('τρέχει ήδη μεταγραφή');
     this.#controller = new AbortController();
-    this.#set({ ...IDLE, status: 'running', fileName: job.media.name || null });
+    this.#set({ ...IDLE, status: JOB_STATUSES.RUNNING, fileName: request.media.name || null });
     await this.#wakeLock.acquire();
     try {
       const transcript = await this.#service.transcribe({
-        ...job,
+        ...request,
         signal: this.#controller.signal,
         onProgress: progress => this.#set({ ...this.#state, progress }),
         onPartialSegments: segments => this.#set({ ...this.#state, partialSegments: [...this.#state.partialSegments, ...segments] }),
       });
-      this.#set({ ...this.#state, status: 'done', transcript });
-      return transcript;
+      this.#set({ ...this.#state, status: JOB_STATUSES.DONE, transcript });
     } catch (error) {
-      this.#set({ ...this.#state, status: isCancellation(error) ? 'cancelled' : 'failed', error: toAppError(error) });
-      return null;
+      if (!isCancellation(error) && !(error && error.code)) console.error(error);
+      this.#set({ ...this.#state, status: isCancellation(error) ? JOB_STATUSES.CANCELLED : JOB_STATUSES.FAILED, error: toAppError(error) });
     } finally {
       this.#controller = null;
       await this.#wakeLock.release();
     }
+    return this.#state;
   }
 
   cancel() {

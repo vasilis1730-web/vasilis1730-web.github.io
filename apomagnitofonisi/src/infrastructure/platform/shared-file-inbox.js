@@ -2,6 +2,7 @@
  * Αρχεία που έστειλαν στην εφαρμογή άλλες εφαρμογές με «Κοινή χρήση» (Web
  * Share Target). Ο service worker τα αποθηκεύει στην cache SHARE_INBOX_CACHE
  * και ανοίγει τη σελίδα με ?shared=1. Εδώ διαβάζονται και σβήνονται.
+ * Υλοποιεί τη θύρα SharedFileInbox.
  *
  * Τα ονόματα (cache, header) είναι κοινό συμβόλαιο με το sw.js.
  */
@@ -31,5 +32,10 @@ export class SharedFileInbox {
       await cache.delete(request);
     }
     return files;
+  }
+
+  /** Διαγραφή όσων περιμένουν (π.χ. στη «Διαγραφή όλων των δεδομένων»). */
+  async clear() {
+    if (this.#caches) await this.#caches.delete(SHARE_INBOX_CACHE);
   }
 }

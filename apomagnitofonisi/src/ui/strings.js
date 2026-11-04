@@ -1,13 +1,21 @@
 /**
  * Όλα τα κείμενα της διεπαφής (ελληνικά), σε ένα σημείο. Κανόνας: καμία άνω
  * τελεία, όπου χρειάζεται κόμμα ή τελεία. Οι συναρτήσεις παίρνουν τιμές που
- * αλλάζουν (αριθμούς, ονόματα).
+ * αλλάζουν (αριθμούς, ονόματα). Οι αριθμοί (μεγέθη, τιμές) έρχονται από το
+ * config, ώστε κάθε στοιχείο να έχει μία πηγή (CA-009).
  */
-import { ERROR_CODES } from '../application/errors.js';
+import { ERROR_CODES, INPUT_ISSUES } from '../application/errors.js';
 import { PROGRESS_STAGES } from '../application/progress.js';
+import { EXPORT_FORMATS } from '../application/export-formats.js';
+import { ERASE_TARGETS } from '../application/data-erasure-service.js';
+import { ENGINE_KINDS, SUMMARY_KINDS } from '../domain/transcript.js';
+import { APP_NAME } from '../config/app-info.js';
+import { AUTO_LOCAL_QUALITY, LOCAL_QUALITY_PRESET_IDS, smallestLocalDownloadMb, SPEAKER_EMBEDDING_MODEL, ELEVENLABS_SCRIBE_USD_PER_HOUR } from '../config/models.js';
+
+const priceFormatter = new Intl.NumberFormat('el-GR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export const STRINGS = Object.freeze({
-  appName: 'Απομαγνητοφώνηση',
+  appName: APP_NAME,
   tagline: 'Αρχεία ήχου και βίντεο σε κείμενο',
   nav: { home: 'Νέα μεταγραφή', history: 'Ιστορικό', settings: 'Ρυθμίσεις', main: 'Κύρια πλοήγηση' },
   footer: {
@@ -35,7 +43,7 @@ export const STRINGS = Object.freeze({
   onboarding: {
     title: 'Καλώς ήρθατε',
     intro: 'Η εφαρμογή μετατρέπει ηχογραφήσεις και βίντεο σε κείμενο, με ομιλητές, χρόνους, υπότιτλους και Word.',
-    local: 'Στη συσκευή: δωρεάν και ιδιωτικά, ο ήχος δεν φεύγει από τη συσκευή. Την πρώτη φορά κατεβαίνει το μοντέλο (από 77 MB).',
+    local: `Στη συσκευή: δωρεάν και ιδιωτικά, ο ήχος δεν φεύγει από τη συσκευή. Την πρώτη φορά κατεβαίνει το μοντέλο (από ${smallestLocalDownloadMb()} MB).`,
     cloud: 'ElevenLabs: πολύ πιο ακριβής μεταγραφή και καλύτερος διαχωρισμός ομιλητών, με δικό σας κλειδί ElevenLabs.',
     summary: 'Περίληψη και πρακτικά: με δικό σας κλειδί Anthropic (Claude).',
     keys: 'Τα κλειδιά μένουν μόνο στη συσκευή σας και πηγαίνουν μόνο στον πάροχο που αφορούν.',
@@ -50,23 +58,15 @@ export const STRINGS = Object.freeze({
     probing: 'Ανάγνωση αρχείου…',
     noAudio: 'Το αρχείο δεν έχει ήχο.',
     engine: 'Πού να γίνει η μεταγραφή',
-    engineLocal: 'Στη συσκευή (δωρεάν, ιδιωτικά)',
-    engineLocalHint: 'Ο ήχος δεν φεύγει από τη συσκευή. Πιο αργό, μέτρια ακρίβεια στα ελληνικά.',
-    engineCloud: 'ElevenLabs (ακριβέστερο, θέλει κλειδί)',
-    engineCloudHint: 'Ο ήχος στέλνεται στο ElevenLabs με το κλειδί σας. Περίπου 0,22 $ ανά ώρα ήχου.',
-    engineCloudNoKey: 'Βάλτε πρώτα κλειδί ElevenLabs στις Ρυθμίσεις.',
+    engineUnavailable: 'Μη διαθέσιμο εδώ',
     goToSettings: 'Στις Ρυθμίσεις',
     language: 'Γλώσσα',
     autoLanguage: 'Αυτόματη ανίχνευση',
     diarize: 'Διαχωρισμός ομιλητών',
-    diarizeLocalHint: 'Πειραματικό στη συσκευή: κατεβαίνει και μοντέλο φωνής (27 MB).',
+    diarizeLocalHint: `Πειραματικό στη συσκευή: κατεβαίνει και μοντέλο φωνής (${SPEAKER_EMBEDDING_MODEL.approxDownloadMb} MB).`,
     speakers: 'Αριθμός ομιλητών',
     speakersAuto: 'Αυτόματα',
     quality: 'Ποιότητα στη συσκευή',
-    qualityAuto: 'Αυτόματα',
-    qualityFast: 'Γρήγορη',
-    qualityBalanced: 'Ισορροπημένη',
-    qualityAccurate: 'Ακριβής (θέλει WebGPU)',
     webgpuYes: 'Η συσκευή έχει WebGPU: η μεταγραφή τρέχει στην κάρτα γραφικών.',
     webgpuNo: 'Η συσκευή δεν έχει WebGPU: η μεταγραφή τρέχει στον επεξεργαστή και είναι πιο αργή.',
     start: 'Έναρξη',
@@ -89,8 +89,46 @@ export const STRINGS = Object.freeze({
       [PROGRESS_STAGES.SAVING]: 'Αποθήκευση',
     },
   },
+  engines: {
+    [ENGINE_KINDS.LOCAL]: {
+      label: 'Στη συσκευή (δωρεάν, ιδιωτικά)',
+      hint: 'Ο ήχος δεν φεύγει από τη συσκευή. Πιο αργό, μέτρια ακρίβεια στα ελληνικά.',
+      short: 'Στη συσκευή',
+      documentName: model => `Whisper στη συσκευή (${model})`,
+    },
+    [ENGINE_KINDS.ELEVENLABS]: {
+      label: 'ElevenLabs (ακριβέστερο, θέλει κλειδί)',
+      hint: `Ο ήχος στέλνεται στο ElevenLabs με το κλειδί σας. Περίπου ${priceFormatter.format(ELEVENLABS_SCRIBE_USD_PER_HOUR)} $ ανά ώρα ήχου.`,
+      short: 'ElevenLabs',
+      documentName: model => `ElevenLabs Scribe (${model})`,
+    },
+  },
+  quality: {
+    [AUTO_LOCAL_QUALITY]: 'Αυτόματα',
+    [LOCAL_QUALITY_PRESET_IDS.FAST]: 'Γρήγορη',
+    [LOCAL_QUALITY_PRESET_IDS.BALANCED]: 'Ισορροπημένη',
+    [LOCAL_QUALITY_PRESET_IDS.ACCURATE]: 'Ακριβής',
+    unavailable: 'θέλει WebGPU',
+    autoResolves: label => `Αυτόματα (${label})`,
+  },
+  exportFormats: {
+    [EXPORT_FORMATS.DOCX]: 'Word (.docx)',
+    [EXPORT_FORMATS.TXT]: 'Κείμενο (.txt)',
+    [EXPORT_FORMATS.SRT]: 'Υπότιτλοι (.srt)',
+    [EXPORT_FORMATS.VTT]: 'Υπότιτλοι (.vtt)',
+    [EXPORT_FORMATS.JSON]: 'Αντίγραφο (.json)',
+  },
+  audioEvents: {
+    byEvent: {
+      laughter: 'γέλια', laughs: 'γέλια', laughing: 'γέλια',
+      applause: 'χειροκροτήματα', clapping: 'χειροκροτήματα',
+      music: 'μουσική', cough: 'βήχας', coughing: 'βήχας', noise: 'θόρυβος', silence: 'σιωπή',
+    },
+    unknown: 'ήχος',
+  },
   transcript: {
     titleLabel: 'Τίτλος',
+    untitled: 'Μεταγραφή χωρίς τίτλο',
     speakers: 'Ομιλητές',
     renameSpeaker: 'Όνομα ομιλητή',
     addSpeaker: 'Νέος ομιλητής',
@@ -104,11 +142,6 @@ export const STRINGS = Object.freeze({
     linkAudio: 'Σύνδεση με αρχείο ήχου',
     linkAudioHint: 'Επιλέξτε το ίδιο αρχείο για να ακούτε και να πηγαίνετε σε κάθε σημείο.',
     export: 'Εξαγωγή',
-    exportDocx: 'Word (.docx)',
-    exportTxt: 'Κείμενο (.txt)',
-    exportSrt: 'Υπότιτλοι (.srt)',
-    exportVtt: 'Υπότιτλοι (.vtt)',
-    exportJson: 'Αντίγραφο (.json)',
     summaries: 'Περίληψη και πρακτικά',
     editSegment: 'Διόρθωση κειμένου',
     playFrom: 'Αναπαραγωγή από',
@@ -120,8 +153,18 @@ export const STRINGS = Object.freeze({
   summary: {
     title: 'Περίληψη και πρακτικά',
     kind: 'Τι να γραφτεί',
-    kinds: { brief: 'Σύντομη περίληψη', minutes: 'Πρακτικά συνεδρίασης', actions: 'Αποφάσεις και εκκρεμότητες', custom: 'Δική μου οδηγία' },
-    fileSuffix: { brief: 'Περίληψη', minutes: 'Πρακτικά', actions: 'Αποφάσεις', custom: 'Σημειώσεις' },
+    kinds: {
+      [SUMMARY_KINDS.BRIEF]: 'Σύντομη περίληψη',
+      [SUMMARY_KINDS.MINUTES]: 'Πρακτικά συνεδρίασης',
+      [SUMMARY_KINDS.ACTIONS]: 'Αποφάσεις και εκκρεμότητες',
+      [SUMMARY_KINDS.CUSTOM]: 'Δική μου οδηγία',
+    },
+    fileSuffix: {
+      [SUMMARY_KINDS.BRIEF]: 'Περίληψη',
+      [SUMMARY_KINDS.MINUTES]: 'Πρακτικά',
+      [SUMMARY_KINDS.ACTIONS]: 'Αποφάσεις',
+      [SUMMARY_KINDS.CUSTOM]: 'Σημειώσεις',
+    },
     customLabel: 'Η οδηγία σας',
     customPlaceholder: 'π.χ. Γράψε μόνο ό,τι αφορά τον προϋπολογισμό, σε λίστα.',
     model: 'Μοντέλο',
@@ -131,6 +174,7 @@ export const STRINGS = Object.freeze({
     stop: 'Διακοπή',
     writing: 'Γράφεται…',
     restarted: 'Το κείμενο ξαναγράφεται από εφεδρικό μοντέλο.',
+    restartedDone: 'Το κείμενο γράφτηκε από εφεδρικό μοντέλο, γιατί το πρώτο αρνήθηκε.',
     truncated: 'Το κείμενο κόπηκε στο όριο μήκους.',
     saved: 'Αποθηκευμένα',
     none: 'Δεν υπάρχει ακόμη περίληψη.',
@@ -150,8 +194,8 @@ export const STRINGS = Object.freeze({
     deleteConfirm: 'Να διαγραφεί αυτή η μεταγραφή; Δεν αναιρείται.',
     segments: 'τμήματα',
     summariesCount: 'περιλήψεις',
-    engineLocal: 'Στη συσκευή',
-    engineCloud: 'ElevenLabs',
+    deleted: 'Η μεταγραφή διαγράφηκε.',
+    allDeleted: 'Όλες οι μεταγραφές διαγράφηκαν.',
   },
   settings: {
     title: 'Ρυθμίσεις',
@@ -173,8 +217,8 @@ export const STRINGS = Object.freeze({
     show: 'Εμφάνιση',
     hide: 'Απόκρυψη',
     remove: 'Αφαίρεση',
-    persistKeys: 'Αποθήκευση των κλειδιών στη συσκευή',
-    persistKeysHint: 'Αν το κλείσετε, τα κλειδιά ισχύουν μόνο μέχρι να κλείσει η καρτέλα.',
+    keyRetentionDevice: 'Αποθήκευση των κλειδιών στη συσκευή',
+    keyRetentionHint: 'Αν το κλείσετε, τα κλειδιά ισχύουν μόνο μέχρι να κλείσει η καρτέλα.',
     claudeModel: 'Μοντέλο για περίληψη και πρακτικά',
     claudeModelDefault: 'προεπιλογή',
     perMillion: 'ανά εκατομμύριο tokens (είσοδος/έξοδος)',
@@ -190,6 +234,14 @@ export const STRINGS = Object.freeze({
     deleteEverything: 'Διαγραφή όλων των δεδομένων',
     deleteEverythingConfirm: 'Να διαγραφούν όλες οι μεταγραφές, τα κλειδιά, οι ρυθμίσεις και τα μοντέλα από αυτή τη συσκευή; Δεν αναιρείται.',
     everythingDeleted: 'Όλα τα δεδομένα διαγράφηκαν από τη συσκευή.',
+    eraseTargets: {
+      [ERASE_TARGETS.TRANSCRIPTS]: 'μεταγραφές',
+      [ERASE_TARGETS.KEYS]: 'κλειδιά',
+      [ERASE_TARGETS.SETTINGS]: 'ρυθμίσεις',
+      [ERASE_TARGETS.MODELS]: 'μοντέλα',
+      [ERASE_TARGETS.SHARED_FILES]: 'αρχεία από κοινή χρήση',
+      [ERASE_TARGETS.SESSION_MEDIA]: 'αρχεία της συνεδρίας',
+    },
     about: 'Σχετικά',
     version: 'Έκδοση',
   },
@@ -205,32 +257,60 @@ export const STRINGS = Object.freeze({
     [ERROR_CODES.NETWORK]: 'Δεν υπάρχει σύνδεση στο διαδίκτυο ή ο πάροχος δεν απαντά.',
     [ERROR_CODES.CANCELLED]: 'Ακυρώθηκε.',
     [ERROR_CODES.MODEL_LOAD_FAILED]: 'Το μοντέλο δεν φόρτωσε. Ελέγξτε τη σύνδεση και τον ελεύθερο χώρο, και δοκιμάστε ξανά.',
+    [ERROR_CODES.TRANSCRIPTION_FAILED]: 'Η μεταγραφή στη συσκευή σταμάτησε (ίσως από έλλειψη μνήμης). Δοκιμάστε μικρότερη ποιότητα ή το ElevenLabs.',
     [ERROR_CODES.DEVICE_UNSUPPORTED]: 'Η συσκευή ή ο browser δεν υποστηρίζει αυτή τη λειτουργία. Δοκιμάστε άλλη ποιότητα ή το ElevenLabs.',
     [ERROR_CODES.REFUSED]: 'Το μοντέλο αρνήθηκε να απαντήσει σε αυτό το περιεχόμενο.',
-    [ERROR_CODES.INVALID_INPUT]: 'Ο πάροχος ή η εφαρμογή απέρριψε το αίτημα.',
+    [ERROR_CODES.PROVIDER_REJECTED]: 'Ο πάροχος απέρριψε το αίτημα.',
+    [ERROR_CODES.INVALID_INPUT]: 'Ελέγξτε τα στοιχεία που δώσατε.',
+    [ERROR_CODES.INVALID_TRANSCRIPT_FILE]: 'Το αρχείο δεν είναι αντίγραφο μεταγραφής αυτής της εφαρμογής (.json).',
+    [ERROR_CODES.EMPTY_TRANSCRIPT]: 'Η μεταγραφή δεν έχει κείμενο.',
     [ERROR_CODES.NOT_FOUND]: 'Δεν βρέθηκε.',
     [ERROR_CODES.STORAGE_FULL]: 'Δεν υπάρχει αρκετός χώρος στη συσκευή.',
+    [ERROR_CODES.ERASE_INCOMPLETE]: 'Δεν διαγράφηκαν όλα τα δεδομένα. Κλείστε τις άλλες καρτέλες της εφαρμογής και δοκιμάστε ξανά.',
     [ERROR_CODES.UNKNOWN]: 'Κάτι πήγε στραβά.',
     providerSaid: 'Μήνυμα παρόχου',
+    notErased: 'Έμειναν',
+  },
+  inputIssues: {
+    [INPUT_ISSUES.EMPTY_KEY]: 'Επικολλήστε πρώτα το κλειδί.',
+    [INPUT_ISSUES.KEY_WHITESPACE]: 'Το κλειδί δεν πρέπει να έχει κενά. Ελέγξτε την επικόλληση.',
+    [INPUT_ISSUES.EMPTY_SPEAKER_NAME]: 'Το όνομα ομιλητή δεν μπορεί να είναι κενό.',
+    [INPUT_ISSUES.EMPTY_INSTRUCTION]: 'Γράψτε πρώτα την οδηγία σας.',
+    [INPUT_ISSUES.EMPTY_FILE]: 'Το αρχείο είναι κενό.',
   },
   documents: {
     date: 'Ημερομηνία',
     duration: 'Διάρκεια',
     engine: 'Μεταγραφή',
     transcriptNotice: 'Αυτόματη μεταγραφή, μπορεί να έχει λάθη.',
-    engineCloud: model => `ElevenLabs Scribe (${model})`,
-    engineLocal: model => `Whisper στη συσκευή (${model})`,
   },
   units: { bytes: 'B', kb: 'KB', mb: 'MB', gb: 'GB' },
 });
 
-/** «Ομιλητής 3» */
-export const speakerDefaultLabel = ordinal => `Ομιλητής ${ordinal}`;
+/** «Ομιλητής 3»: η μία ονομασία για τους ομιλητές σε όλα τα στρώματα (API-008). */
+export const speakerLabelFor = ordinal => `Ομιλητής ${ordinal}`;
 
-/** Μήνυμα για τον χρήστη από AppError (κωδικός και, όπου υπάρχει, μήνυμα παρόχου). */
+/**
+ * Μήνυμα για τον χρήστη από AppError: ανά κωδικό, και για το INVALID_INPUT
+ * ανά αιτία (API-001). Ό,τι δεν είναι AppError (λάθος του κώδικα) → «Κάτι πήγε στραβά».
+ */
 export function errorMessage(error) {
-  const code = error && error.code ? error.code : ERROR_CODES.UNKNOWN;
-  return STRINGS.errors[code] || STRINGS.errors[ERROR_CODES.UNKNOWN];
+  const code = error && error.code && STRINGS.errors[error.code] ? error.code : ERROR_CODES.UNKNOWN;
+  if (code === ERROR_CODES.INVALID_INPUT) {
+    const reason = error.details && error.details.reason;
+    if (reason && STRINGS.inputIssues[reason]) return STRINGS.inputIssues[reason];
+  }
+  return STRINGS.errors[code];
+}
+
+/** Η ετικέτα μιας μορφής εξαγωγής, π.χ. «Word (.docx)» (OO-007). */
+export function exportFormatLabel(format) {
+  return STRINGS.exportFormats[format] || format;
+}
+
+/** Η ετικέτα ενός επιπέδου ποιότητας ή του «Αυτόματα». */
+export function qualityLabel(choice) {
+  return STRINGS.quality[choice] || choice;
 }
 
 export function providerMessage(error) {

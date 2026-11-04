@@ -3,8 +3,11 @@
  * αναγνωριστεί, ακύρωση, και το αποτέλεσμα ή το σφάλμα.
  */
 import { h, replaceContent } from '../dom.js';
-import { STRINGS, errorMessage, providerMessage } from '../strings.js';
+import { STRINGS } from '../strings.js';
+import { describeError } from '../feedback.js';
 import { formatBytes, formatDuration, formatPercent } from '../formatters.js';
+import { ROUTES } from '../routes.js';
+import { JOB_STATUSES } from '../transcription-job.js';
 import { formatClock } from '../../domain/time-format.js';
 import { PROGRESS_STAGES } from '../../application/progress.js';
 
@@ -18,6 +21,11 @@ const STAGE_ORDER = [
 ];
 /** Πόσα από τα τελευταία τμήματα δείχνονται όσο προχωρά η μεταγραφή. */
 const VISIBLE_PARTIAL_SEGMENTS = 30;
+
+const HEADINGS = Object.freeze({
+  [JOB_STATUSES.CANCELLED]: STRINGS.progress.cancelledTitle,
+  [JOB_STATUSES.FAILED]: STRINGS.progress.failedTitle,
+});
 
 export class ProgressView {
   title = STRINGS.progress.title;
@@ -49,22 +57,22 @@ export class ProgressView {
   }
 
   #draw(state) {
-    if (state.status === 'idle') { queueMicrotask(() => this.#router.navigate('/')); return; }
+    if (state.status === JOB_STATUSES.IDLE) { queueMicrotask(() => this.#router.navigate(ROUTES.home())); return; }
     if (state.progress) this.#seenStages.add(state.progress.stage);
     const s = STRINGS.progress;
-    const running = state.status === 'running';
-    const heading = running ? s.title : state.status === 'cancelled' ? s.cancelledTitle : state.status === 'failed' ? s.failedTitle : s.title;
+    const running = state.status === JOB_STATUSES.RUNNING;
+    const heading = HEADINGS[state.status] || s.title;
     replaceContent(this.#root, 
       h('h1', {}, heading),
       state.fileName ? h('p', { class: 'file-name' }, state.fileName) : null,
       running ? h('p', { class: 'notice' }, s.keepOpen) : null,
       running ? this.#stages(state.progress) : null,
-      state.status === 'failed' ? this.#failure(state.error) : null,
+      state.status === JOB_STATUSES.FAILED ? this.#failure(state.error) : null,
       this.#partial(state.partialSegments),
       h('div', { class: 'actions' },
         running
           ? h('button', { type: 'button', class: 'danger', onclick: () => this.#job.cancel() }, STRINGS.common.cancel)
-          : h('button', { type: 'button', class: 'primary', onclick: () => { this.#job.reset(); this.#router.navigate('/'); } }, s.newFile)),
+          : h('button', { type: 'button', class: 'primary', onclick: () => { this.#job.reset(); this.#router.navigate(ROUTES.home()); } }, s.newFile)),
     );
   }
 
@@ -92,10 +100,7 @@ export class ProgressView {
   }
 
   #failure(error) {
-    const fromProvider = providerMessage(error);
-    return h('div', { class: 'card error-card', role: 'alert' },
-      h('p', {}, errorMessage(error)),
-      fromProvider ? h('p', { class: 'meta' }, `${STRINGS.errors.providerSaid}: ${fromProvider}`) : null);
+    return h('div', { class: 'card error-card', role: 'alert' }, h('p', {}, describeError(error)));
   }
 
   #partial(segments) {

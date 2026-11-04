@@ -1,10 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ElevenLabsEngine } from '../../../src/infrastructure/transcription/elevenlabs-engine.js';
-import { readScribeResponse, scribeErrorFor } from '../../../src/infrastructure/transcription/elevenlabs-response.js';
+import { ElevenLabsEngine } from '../../../src/infrastructure/elevenlabs/elevenlabs-engine.js';
+import { readScribeResponse, elevenLabsErrorFor } from '../../../src/infrastructure/elevenlabs/elevenlabs-response.js';
 import { XhrUploader } from '../../../src/infrastructure/http/xhr-uploader.js';
-import { ElevenLabsKeyVerifier } from '../../../src/infrastructure/keys/elevenlabs-key-verifier.js';
-import { ERROR_CODES } from '../../../src/application/errors.js';
+import { ElevenLabsKeyVerifier } from '../../../src/infrastructure/elevenlabs/elevenlabs-key-verifier.js';
+import { AppError, ERROR_CODES } from '../../../src/application/errors.js';
+import { KEY_PROVIDERS } from '../../../src/application/api-key-service.js';
+import { ENGINE_KINDS } from '../../../src/domain/transcript.js';
 
 const scribeBody = {
   language_code: 'ell',
@@ -29,38 +31,46 @@ class FakeUploader {
 }
 
 const options = { languageCode: 'el', diarize: true, expectedSpeakers: 2 };
+/** Τα ονόματα των ηχητικών συμβάντων τα δίνει η διεπαφή (εδώ ένα μικρό δείγμα). */
+const audioEventLabels = { byEvent: { laughter: 'γέλια' }, unknown: 'ήχος' };
 
 function media({ type = 'audio/mpeg', size = 1000, name = 'Σύσκεψη.mp3' } = {}) {
   return new File([new Uint8Array(size)], name, { type });
 }
 
-test('απάντηση Scribe → tokens: χωρίς κενά, συμβάντα στα ελληνικά, γλώσσα ISO 639-1', () => {
-  const { tokens, languageCode, durationSec } = readScribeResponse(scribeBody);
+test('απάντηση Scribe → tokens: χωρίς κενά, συμβάντα με τα ονόματα της διεπαφής, γλώσσα ISO 639-1', () => {
+  const { tokens, languageCode, durationSec } = readScribeResponse(scribeBody, { audioEventLabels });
   assert.deepEqual(tokens.map(t => [t.text, t.kind, t.speakerKey]), [
     ['Καλημέρα', 'word', 'speaker_0'], ['σας.', 'word', 'speaker_0'], ['[γέλια]', 'event', 'speaker_0'], ['Καλημέρα.', 'word', 'speaker_1'],
   ]);
   assert.equal(languageCode, 'el');
   assert.equal(durationSec, 8.5);
   assert.deepEqual(readScribeResponse({}).tokens, []);
+  assert.equal(readScribeResponse(scribeBody).tokens[2].text, '[laughter]', 'χωρίς ετικέτες μένει το όνομα του ElevenLabs');
+  const unnamed = readScribeResponse({ words: [{ text: '()', type: 'audio_event', start: 0, end: 1 }] }, { audioEventLabels });
+  assert.equal(unnamed.tokens[0].text, '[ήχος]');
 });
 
 test('σφάλματα HTTP → κωδικοί', () => {
   const body = (status, message) => JSON.stringify({ detail: { status, message } });
-  assert.equal(scribeErrorFor(401, body('invalid_api_key', 'Invalid API key')).code, ERROR_CODES.KEY_INVALID);
-  assert.equal(scribeErrorFor(401, body('quota_exceeded', 'no credits')).code, ERROR_CODES.QUOTA_EXCEEDED);
-  assert.equal(scribeErrorFor(402, '').code, ERROR_CODES.QUOTA_EXCEEDED);
-  assert.equal(scribeErrorFor(413, '').code, ERROR_CODES.FILE_TOO_LARGE);
-  assert.equal(scribeErrorFor(429, body('too_many_concurrent_requests', 'x')).code, ERROR_CODES.RATE_LIMITED);
-  const invalid = scribeErrorFor(422, JSON.stringify({ detail: [{ msg: 'file is required' }] }));
-  assert.equal(invalid.code, ERROR_CODES.INVALID_INPUT);
+  assert.equal(elevenLabsErrorFor(401, body('invalid_api_key', 'Invalid API key')).code, ERROR_CODES.KEY_INVALID);
+  assert.equal(elevenLabsErrorFor(401, body('quota_exceeded', 'no credits')).code, ERROR_CODES.QUOTA_EXCEEDED);
+  assert.equal(elevenLabsErrorFor(402, '').code, ERROR_CODES.QUOTA_EXCEEDED);
+  assert.equal(elevenLabsErrorFor(403, '').code, ERROR_CODES.KEY_INVALID);
+  assert.equal(elevenLabsErrorFor(413, '').code, ERROR_CODES.FILE_TOO_LARGE);
+  assert.equal(elevenLabsErrorFor(429, body('too_many_concurrent_requests', 'x')).code, ERROR_CODES.RATE_LIMITED);
+  const invalid = elevenLabsErrorFor(422, JSON.stringify({ detail: [{ msg: 'file is required' }] }));
+  assert.equal(invalid.code, ERROR_CODES.PROVIDER_REJECTED, 'το απέρριψε ο πάροχος, όχι η φόρμα της εφαρμογής');
   assert.equal(invalid.details.providerMessage, 'file is required');
-  assert.equal(scribeErrorFor(503, 'oops').code, ERROR_CODES.OVERLOADED);
-  assert.equal(scribeErrorFor(500, '').code, ERROR_CODES.UNKNOWN);
+  assert.equal(elevenLabsErrorFor(400, body('invalid_language', 'bad language')).code, ERROR_CODES.PROVIDER_REJECTED);
+  assert.equal(elevenLabsErrorFor(503, 'oops').code, ERROR_CODES.OVERLOADED);
+  assert.equal(elevenLabsErrorFor(500, '').code, ERROR_CODES.UNKNOWN);
 });
 
 test('μεταγραφή: πεδία του αιτήματος, πρόοδος και τμήματα ανά ομιλητή', async () => {
   const uploader = new FakeUploader({ status: 200, bodyText: JSON.stringify(scribeBody) });
-  const engine = new ElevenLabsEngine({ getApiKey: () => 'xi-key', uploader, mediaReader: { async extractCompactAudio() { throw new Error('δεν έπρεπε να κληθεί'); } } });
+  const engine = new ElevenLabsEngine({ getApiKey: () => 'xi-key', uploader, audioEventLabels, mediaReader: { async extractCompactAudio() { throw new Error('δεν έπρεπε να κληθεί'); } } });
+  assert.equal(engine.kind, ENGINE_KINDS.ELEVENLABS);
   const stages = [];
   const result = await engine.recognize({ media: media(), options, onProgress: p => stages.push([p.stage, p.fraction]) });
   const { url, request } = uploader.calls[0];
@@ -86,14 +96,31 @@ test('αυτόματη γλώσσα και χωρίς ομιλητές: χωρί
   assert.ok(result.segments.every(s => s.speakerKey === null));
 });
 
-test('βίντεο: στέλνεται μόνο ο ήχος, με το σωστό όνομα', async () => {
+test('βίντεο: στέλνεται μόνο ο ήχος, με το σωστό όνομα και πρόοδο ανάγνωσης', async () => {
   const uploader = new FakeUploader({ status: 200, bodyText: JSON.stringify(scribeBody) });
   const compact = new Blob([new Uint8Array(10)], { type: 'audio/ogg' });
   let extracted = 0;
-  const engine = new ElevenLabsEngine({ getApiKey: () => 'k', uploader, mediaReader: { async extractCompactAudio(m, { onProgress }) { extracted += 1; onProgress(0.5); return compact; } } });
-  await engine.recognize({ media: media({ type: 'video/mp4', name: 'Βίντεο.mp4' }), options });
+  const engine = new ElevenLabsEngine({ getApiKey: () => 'k', uploader, mediaReader: { async extractCompactAudio(m, { onFraction }) { extracted += 1; onFraction(0.5); return { audio: compact, compacted: true }; } } });
+  const reading = [];
+  await engine.recognize({ media: media({ type: 'video/mp4', name: 'Βίντεο.mp4' }), options, onProgress: p => { if (p.stage === 'reading') reading.push(p.fraction); } });
   assert.equal(extracted, 1);
+  assert.deepEqual(reading, [0, 0.5]);
   assert.equal(uploader.calls[0].request.body.get('file').name, 'Βίντεο.ogg');
+  assert.equal(uploader.calls[0].request.body.get('file').size, 10);
+});
+
+test('βίντεο: χωρίς συμπίεση ή όταν αποτύχει στέλνεται το αρχικό, η ακύρωση όμως σταματά', async () => {
+  const send = async extractCompactAudio => {
+    const uploader = new FakeUploader({ status: 200, bodyText: JSON.stringify(scribeBody) });
+    const engine = new ElevenLabsEngine({ getApiKey: () => 'k', uploader, mediaReader: { extractCompactAudio } });
+    await engine.recognize({ media: media({ type: 'video/mp4', name: 'Βίντεο.mp4', size: 20 }), options });
+    return uploader.calls[0].request.body.get('file');
+  };
+  const notCompacted = await send(async m => ({ audio: m, compacted: false }));
+  assert.deepEqual([notCompacted.name, notCompacted.size], ['Βίντεο.mp4', 20]);
+  const failed = await send(async () => { throw new AppError(ERROR_CODES.UNSUPPORTED_MEDIA, 'χωρίς κωδικοποιητή'); });
+  assert.deepEqual([failed.name, failed.size], ['Βίντεο.mp4', 20], 'η εφεδρεία αποφασίζεται μόνο στη μηχανή');
+  await assert.rejects(send(async () => { throw new AppError(ERROR_CODES.CANCELLED, 'stop'); }), e => e.code === ERROR_CODES.CANCELLED);
 });
 
 test('χωρίς κλειδί, σφάλμα του παρόχου και άκυρη απάντηση', async () => {
@@ -142,6 +169,7 @@ test('έλεγχος κλειδιού: έγκυρο, περιορισμένο, �
   const response = (status, body = '') => ({ ok: status === 200, status, text: async () => body });
   const calls = [];
   const verifier = status => new ElevenLabsKeyVerifier({ fetch: async (url, init) => { calls.push([url, init.headers]); return status; } });
+  assert.equal(verifier(response(200)).provider, KEY_PROVIDERS.ELEVENLABS);
   await verifier(response(200)).verify('k1');
   assert.deepEqual(calls[0], ['https://api.elevenlabs.io/v1/user', { 'xi-api-key': 'k1' }]);
   await verifier(response(401, '{"detail":{"status":"missing_permissions","message":"missing user_read"}}')).verify('k');

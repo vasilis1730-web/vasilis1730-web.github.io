@@ -1,327 +1,161 @@
 /**
- * Προβολή μιας μεταγραφής: τίτλος, αναπαραγωγή με επισήμανση του τμήματος που
- * ακούγεται, ομιλητές (μετονομασία, χρόνος ομιλίας), τμήματα με χρόνο που
- * πηγαίνει στο σημείο, διόρθωση κειμένου, αλλαγή ομιλητή, αναζήτηση,
- * εξαγωγή, αντιγραφή και κοινή χρήση.
+ * Προβολή μιας μεταγραφής. Συνθέτει τα μέρη της σελίδας, που το καθένα κρατά
+ * το δικό του DOM και ενημερώνεται επί τόπου (OO-001):
+ * - ExportToolbar: περίληψη, εξαγωγή, αντιγραφή, κοινή χρήση,
+ * - MediaPlayer: αναπαραγωγή (φτιάχνεται μία φορά, δεν σταματά στις διορθώσεις),
+ * - SpeakersPanel: ονόματα, χρώματα, χρόνος ομιλίας,
+ * - SegmentList: τμήματα, διόρθωση κειμένου, αναζήτηση, τρέχον τμήμα.
+ * Η προβολή εφαρμόζει κάθε διόρθωση μέσω του TranscriptEditor και ενημερώνει
+ * μόνο τα μέρη που αφορά.
  */
 import { h, replaceContent, field } from '../dom.js';
-import { STRINGS, matchesFound, errorMessage } from '../strings.js';
+import { STRINGS, errorMessage } from '../strings.js';
+import { runAction } from '../feedback.js';
 import { formatDateTime, formatDuration } from '../formatters.js';
-import { formatClock } from '../../domain/time-format.js';
-import { speakerTalkTime, transcriptDuration, segmentIndexAt, findSpeaker } from '../../domain/transcript.js';
-import { promptText } from '../components/confirm-dialog.js';
-
-const EXPORT_LABELS = Object.freeze({
-  docx: STRINGS.transcript.exportDocx,
-  txt: STRINGS.transcript.exportTxt,
-  srt: STRINGS.transcript.exportSrt,
-  vtt: STRINGS.transcript.exportVtt,
-  json: STRINGS.transcript.exportJson,
-});
+import { describeEngine, displayTitle } from '../presentation.js';
+import { ROUTES, hrefFor } from '../routes.js';
+import { transcriptDuration } from '../../domain/transcript.js';
+import { promptText, pickSpeaker, NEW_SPEAKER } from '../components/confirm-dialog.js';
+import { ExportToolbar } from '../components/export-toolbar.js';
+import { MediaPlayer } from '../components/media-player.js';
+import { SpeakersPanel } from '../components/speakers-panel.js';
+import { SegmentList } from '../components/segment-list.js';
 
 export class TranscriptView {
   title = STRINGS.appName;
 
   #deps;
   #id;
+  #context = null;
   #transcript = null;
   #root = null;
-  #list = null;
-  #rows = [];
-  #media = null;
-  #query = '';
-  #currentIndex = -1;
+  #heading = null;
+  #titleInput = null;
+  #toolbar;
+  #player;
+  #speakers;
+  #segments;
 
   /**
    * @param {Object} deps
    * @param {import('../../application/library-service.js').LibraryService} deps.library
    * @param {import('../../application/transcript-editor.js').TranscriptEditor} deps.editor
    * @param {import('../../application/export-service.js').ExportService} deps.exports
-   * @param {import('../../infrastructure/platform/file-saver.js').BrowserFileSaver} deps.fileSaver
+   * @param {import('../../application/ports.js').FileDelivery} deps.fileDelivery
+   * @param {import('../../application/ports.js').Clipboard} deps.clipboard
    * @param {import('../session-media.js').SessionMedia} deps.sessionMedia
-   * @param {{ navigate: (path: string) => void }} deps.router
    * @param {import('../components/toast.js').ToastHost} deps.toasts
-   * @param {(engine: { kind: string, model: string }) => string} deps.describeEngine
-   * @param {Document} deps.document
-   * @param {string} transcriptId
+   * @param {{ id: string }} params
    */
-  constructor(deps, transcriptId) {
+  constructor(deps, { id }) {
     this.#deps = deps;
-    this.#id = transcriptId;
+    this.#id = id;
+    this.#toolbar = new ExportToolbar({ exports: deps.exports, fileDelivery: deps.fileDelivery, clipboard: deps.clipboard, toasts: deps.toasts });
+    this.#player = new MediaPlayer({ sessionMedia: deps.sessionMedia, transcriptId: id, onTime: seconds => this.#segments.highlightAt(seconds, { follow: this.#player.isPlaying }) });
+    this.#speakers = new SpeakersPanel({ onRename: (speakerId, label) => this.#renameSpeaker(speakerId, label), onAdd: () => this.#addSpeaker() });
+    this.#segments = new SegmentList({
+      onSeek: seconds => this.#player.playFrom(seconds),
+      onEditText: (segmentId, text) => this.#editText(segmentId, text),
+      onChooseSpeaker: segmentId => this.#chooseSpeaker(segmentId),
+    });
   }
 
-  render() {
+  /** @param {import('../app-shell.js').ViewContext} context */
+  render(context) {
+    this.#context = context;
     this.#root = h('section', { class: 'view transcript-view' }, h('h1', {}, STRINGS.common.loading));
-    this.#deps.library.open(this.#id).then(transcript => {
-      this.#transcript = transcript;
-      this.title = transcript.title;
-      this.#deps.document.title = `${transcript.title} | ${STRINGS.appName}`;
-      this.#draw();
-    }, error => {
-      replaceContent(this.#root, h('h1', {}, STRINGS.transcript.notFound), h('p', {}, errorMessage(error)), h('a', { href: '#/history' }, STRINGS.nav.history));
+    this.#deps.library.open(this.#id).then(transcript => this.#show(transcript), error => {
+      replaceContent(this.#root, h('h1', {}, STRINGS.transcript.notFound), h('p', {}, errorMessage(error)), h('a', { href: hrefFor(ROUTES.history()) }, STRINGS.nav.history));
     });
     return this.#root;
   }
 
   dispose() {
-    if (this.#media) this.#media.pause();
+    this.#player.dispose();
   }
 
   /* ---------------------------------------------------------------- σχεδίαση */
 
-  #draw() {
-    const t = this.#transcript;
-    const heading = h('h1', {}, t.title);
-    replaceContent(this.#root, 
-      heading,
-      h('p', { class: 'meta' }, formatDateTime(t.createdAt), `, ${formatDuration(transcriptDuration(t))}, ${this.#deps.describeEngine(t.engine)}`),
-      this.#toolbar(),
-      this.#titleField(heading),
-      this.#playerSection(),
-      t.speakers.length ? this.#speakersPanel() : null,
-      t.segments.length ? this.#segmentsSection() : h('p', { class: 'notice' }, STRINGS.transcript.empty),
-    );
+  #show(transcript) {
+    this.#transcript = transcript;
+    this.#heading = h('h1', {});
+    this.#titleInput = h('input', { type: 'text', maxLength: 200, autocomplete: 'off' });
+    this.#titleInput.addEventListener('change', () => this.#setTitle(this.#titleInput.value));
+    replaceContent(this.#root,
+      this.#heading,
+      h('p', { class: 'meta' }, formatDateTime(transcript.createdAt), `, ${formatDuration(transcriptDuration(transcript))}, ${describeEngine(transcript.engine)}`),
+      this.#toolbar.element(),
+      field(STRINGS.transcript.titleLabel, this.#titleInput),
+      this.#player.element(),
+      this.#speakers.element(),
+      transcript.segments.length ? this.#segments.element() : h('p', { class: 'notice' }, STRINGS.transcript.empty));
+    this.#segments.setTranscript(transcript);
+    this.#refreshTitle();
+    this.#speakers.update(transcript);
   }
 
-  #toolbar() {
-    const exportsMenu = h('details', { class: 'menu' },
-      h('summary', { class: 'button secondary' }, STRINGS.transcript.export),
-      h('div', { class: 'menu-items' }, this.#deps.exports.transcriptFormats.map(format =>
-        h('button', { type: 'button', onclick: () => { exportsMenu.open = false; this.#download(format); } }, EXPORT_LABELS[format] || format))));
-    return h('div', { class: 'toolbar' },
-      h('a', { class: 'button primary', href: `#/t/${encodeURIComponent(this.#id)}/summary` }, STRINGS.transcript.summaries),
-      exportsMenu,
-      h('button', { type: 'button', class: 'secondary', onclick: () => this.#copyAll() }, STRINGS.common.copy),
-      this.#canShare() ? h('button', { type: 'button', class: 'secondary', onclick: () => this.#share() }, STRINGS.common.share) : null);
+  #refreshTitle() {
+    const title = displayTitle(this.#transcript);
+    this.#heading.textContent = title;
+    if (document.activeElement !== this.#titleInput) this.#titleInput.value = this.#transcript.title;
+    this.title = title;
+    this.#context?.refreshTitle();
+    this.#toolbar.setTranscript(this.#transcript);
   }
 
-  #titleField(heading) {
-    const input = h('input', { type: 'text', value: this.#transcript.title, maxLength: 200, autocomplete: 'off' });
-    input.addEventListener('change', () => this.#edit(t => this.#deps.editor.setTitle(t, input.value), () => {
-      heading.textContent = this.#transcript.title;
-      input.value = this.#transcript.title;
-    }));
-    return field(STRINGS.transcript.titleLabel, input);
+  /* ---------------------------------------------------------------- διορθώσεις */
+
+  /** Εφαρμόζει μια διόρθωση. Επιστρέφει true όταν αποθηκεύτηκε. */
+  async #apply(change) {
+    const updated = await runAction(this.#deps.toasts, () => change(this.#transcript));
+    if (!updated) return false;
+    this.#transcript = updated;
+    this.#toolbar.setTranscript(updated);
+    return true;
   }
 
-  #playerSection() {
-    const url = this.#deps.sessionMedia.urlFor(this.#id);
-    if (!url) {
-      const input = h('input', { type: 'file', accept: 'audio/*,video/*', id: 'link-audio', class: 'visually-hidden' });
-      input.addEventListener('change', () => {
-        if (!input.files || !input.files[0]) return;
-        this.#deps.sessionMedia.attach(this.#id, input.files[0]);
-        this.#draw();
-      });
-      return h('div', { class: 'card player-card' },
-        h('label', { for: 'link-audio', class: 'button secondary' }, STRINGS.transcript.linkAudio),
-        input,
-        h('p', { class: 'hint' }, STRINGS.transcript.linkAudioHint));
-    }
-    const file = this.#deps.sessionMedia.fileFor(this.#id);
-    const isVideo = file && String(file.type).startsWith('video/');
-    this.#media = h(isVideo ? 'video' : 'audio', { controls: true, preload: 'metadata', src: url, class: 'player', playsInline: true });
-    this.#media.addEventListener('timeupdate', () => this.#highlightAt(this.#media.currentTime));
-    return h('div', { class: 'card player-card' }, this.#media);
+  async #setTitle(title) {
+    await this.#apply(t => this.#deps.editor.setTitle(t, title));
+    this.#titleInput.value = this.#transcript.title;
+    this.#refreshTitle();
   }
 
-  #speakersPanel() {
-    const t = this.#transcript;
-    const talk = speakerTalkTime(t);
-    return h('section', { class: 'card speakers', 'aria-labelledby': 'speakers-title' },
-      h('h2', { id: 'speakers-title' }, STRINGS.transcript.speakers),
-      h('ul', {}, t.speakers.map(speaker => {
-        const input = h('input', { type: 'text', value: speaker.label, maxLength: 80, 'aria-label': `${STRINGS.transcript.renameSpeaker} ${speaker.label}` });
-        input.addEventListener('change', () => this.#edit(tr => this.#deps.editor.renameSpeaker(tr, speaker.id, input.value), () => this.#draw()));
-        return h('li', { class: ['speaker', speakerClass(speaker)] },
-          h('span', { class: 'swatch', 'aria-hidden': 'true' }), input,
-          h('span', { class: 'meta' }, `${formatDuration(talk.get(speaker.id) || 0)} ${STRINGS.transcript.talkTime}`));
-      })),
-      h('button', { type: 'button', class: 'secondary', onclick: () => this.#addSpeaker() }, STRINGS.transcript.addSpeaker));
-  }
-
-  #segmentsSection() {
-    const search = h('input', { type: 'search', value: this.#query, autocomplete: 'off' });
-    const count = h('p', { class: 'meta', 'aria-live': 'polite' });
-    search.addEventListener('input', () => { this.#query = search.value; this.#applySearch(count); });
-    this.#list = h('ol', { class: 'segments' });
-    this.#rows = this.#transcript.segments.map((segment, index) => this.#segmentRow(segment, index));
-    this.#list.append(...this.#rows);
-    const section = h('section', { class: 'transcript-body', 'aria-labelledby': 'body-title' },
-      h('h2', { id: 'body-title', class: 'visually-hidden' }, STRINGS.transcript.titleLabel),
-      h('p', { class: 'hint' }, STRINGS.transcript.autoNotice),
-      field(STRINGS.transcript.search, search), count,
-      this.#list);
-    if (this.#query) this.#applySearch(count);
-    return section;
-  }
-
-  #segmentRow(segment, index) {
-    const t = this.#transcript;
-    const speaker = segment.speakerId ? findSpeaker(t, segment.speakerId) : null;
-    const time = h('button', { type: 'button', class: 'time', 'aria-label': `${STRINGS.transcript.playFrom} ${formatClock(segment.start)}`, onclick: () => this.#playFrom(segment.start) }, formatClock(segment.start));
-    const chip = t.speakers.length
-      ? h('button', { type: 'button', class: 'speaker-chip', 'aria-label': `${STRINGS.transcript.speakerOfSegment}: ${speaker ? speaker.label : STRINGS.transcript.noSpeaker}`, onclick: () => this.#chooseSpeaker(segment) },
-        speaker ? speaker.label : STRINGS.transcript.noSpeaker)
-      : null;
-    const text = h('p', { class: 'text', tabIndex: 0, lang: t.languageCode || 'el', 'aria-label': STRINGS.transcript.editSegment });
-    text.setAttribute('contenteditable', 'plaintext-only');
-    if (text.contentEditable !== 'plaintext-only') text.setAttribute('contenteditable', 'true');
-    renderText(text, segment.text, this.#query);
-    text.addEventListener('focus', () => renderText(text, this.#segmentText(segment.id), ''));
-    text.addEventListener('keydown', event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); text.blur(); } });
-    text.addEventListener('blur', () => {
-      const value = text.textContent.replace(/\s+/g, ' ').trim();
-      if (value === this.#segmentText(segment.id)) { renderText(text, value, this.#query); return; }
-      this.#edit(tr => this.#deps.editor.editSegmentText(tr, segment.id, value), () => renderText(text, this.#segmentText(segment.id), this.#query));
-    });
-    const row = h('li', { class: ['segment', speaker ? speakerClass(speaker) : 'no-speaker'], dataset: { index: String(index) } }, time, chip, text);
-    return row;
-  }
-
-  /* ---------------------------------------------------------------- ενέργειες */
-
-  async #edit(change, after) {
-    try {
-      this.#transcript = await change(this.#transcript);
-      after();
-    } catch (error) {
-      this.#deps.toasts.show(errorMessage(error), { tone: 'error' });
+  async #renameSpeaker(speakerId, label) {
+    if (await this.#apply(t => this.#deps.editor.renameSpeaker(t, speakerId, label))) {
+      this.#speakers.update(this.#transcript);
+      this.#segments.updateSpeakers(this.#transcript);
+    } else {
+      this.#speakers.restore(speakerId);
     }
   }
 
-  async #chooseSpeaker(segment) {
-    const t = this.#transcript;
-    const options = [...t.speakers.map(s => ({ id: s.id, label: s.label })), { id: null, label: STRINGS.transcript.noSpeaker }];
-    const chosen = await pickSpeaker(this.#deps.document, options, segment.speakerId);
-    if (chosen === undefined) return;
-    if (chosen === NEW_SPEAKER) { await this.#addSpeaker(segment); return; }
-    await this.#edit(tr => this.#deps.editor.assignSpeaker(tr, segment.id, chosen), () => this.#draw());
+  async #editText(segmentId, text) {
+    await this.#apply(t => this.#deps.editor.editSegmentText(t, segmentId, text));
+    this.#segments.updateSegment(this.#transcript, segmentId);
   }
 
-  async #addSpeaker(segment = null) {
-    const name = await promptText(this.#deps.document, { label: STRINGS.transcript.newSpeakerName });
-    if (!name) return;
-    try {
-      const { transcript, speakerId } = await this.#deps.editor.addSpeaker(this.#transcript, name);
-      this.#transcript = segment ? await this.#deps.editor.assignSpeaker(transcript, segment.id, speakerId) : transcript;
-      this.#draw();
-    } catch (error) {
-      this.#deps.toasts.show(errorMessage(error), { tone: 'error' });
-    }
-  }
-
-  #playFrom(seconds) {
-    if (!this.#media) return;
-    this.#media.currentTime = seconds;
-    this.#media.play().catch(() => {});
-  }
-
-  #highlightAt(seconds) {
-    const index = segmentIndexAt(this.#transcript, seconds);
-    if (index === this.#currentIndex) return;
-    this.#rows[this.#currentIndex]?.classList.remove('current');
-    this.#currentIndex = index;
-    const row = this.#rows[index];
-    if (!row) return;
-    row.classList.add('current');
-    const editing = this.#deps.document.activeElement && this.#deps.document.activeElement.isContentEditable;
-    if (!editing && !this.#media.paused) row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-  }
-
-  #applySearch(countNode) {
-    const query = normalizeForSearch(this.#query);
-    let matches = 0;
-    this.#transcript.segments.forEach((segment, i) => {
-      const row = this.#rows[i];
-      const hit = !query || normalizeForSearch(segment.text).includes(query);
-      row.hidden = !hit;
-      if (hit && query) matches += 1;
-      const text = row.querySelector('.text');
-      if (text !== this.#deps.document.activeElement) renderText(text, segment.text, this.#query);
-    });
-    countNode.textContent = query ? (matches ? matchesFound(matches) : STRINGS.transcript.noMatches) : '';
-  }
-
-  #download(format) {
-    try {
-      this.#deps.fileSaver.download(this.#deps.exports.exportTranscript(this.#transcript, format));
-    } catch (error) {
-      this.#deps.toasts.show(errorMessage(error), { tone: 'error' });
-    }
-  }
-
-  async #copyAll() {
-    try {
-      await this.#deps.fileSaver.copyText(String(this.#deps.exports.exportTranscript(this.#transcript, 'txt').data));
-      this.#deps.toasts.show(STRINGS.common.copied, { tone: 'success' });
-    } catch (error) {
-      this.#deps.toasts.show(errorMessage(error), { tone: 'error' });
-    }
-  }
-
-  #canShare() {
-    return this.#transcript && this.#deps.fileSaver.canShare(this.#deps.exports.exportTranscript(this.#transcript, 'txt'));
-  }
-
-  async #share() {
-    try {
-      await this.#deps.fileSaver.share(this.#deps.exports.exportTranscript(this.#transcript, 'docx'), this.#transcript.title);
-    } catch (error) {
-      this.#deps.toasts.show(errorMessage(error), { tone: 'error' });
-    }
-  }
-
-  #segmentText(segmentId) {
+  async #chooseSpeaker(segmentId) {
     const segment = this.#transcript.segments.find(s => s.id === segmentId);
-    return segment ? segment.text : '';
+    if (!segment) return;
+    const options = [...this.#transcript.speakers.map(s => ({ id: s.id, label: s.label })), { id: null, label: STRINGS.transcript.noSpeaker }];
+    const chosen = await pickSpeaker({ options, currentId: segment.speakerId });
+    if (chosen === undefined) return;
+    if (chosen === NEW_SPEAKER) { await this.#addSpeaker(segmentId); return; }
+    if (await this.#apply(t => this.#deps.editor.assignSpeaker(t, segmentId, chosen))) {
+      this.#segments.updateSegment(this.#transcript, segmentId);
+      this.#speakers.update(this.#transcript);
+    }
+  }
+
+  async #addSpeaker(segmentId = null) {
+    const name = await promptText({ label: STRINGS.transcript.newSpeakerName });
+    if (!name) return;
+    const added = await this.#apply(async t => {
+      const { transcript, speakerId } = await this.#deps.editor.addSpeaker(t, name);
+      return segmentId ? this.#deps.editor.assignSpeaker(transcript, segmentId, speakerId) : transcript;
+    });
+    if (!added) return;
+    this.#speakers.update(this.#transcript);
+    if (segmentId) this.#segments.updateSegment(this.#transcript, segmentId);
   }
 }
-
-const NEW_SPEAKER = Symbol('new-speaker');
-
-function speakerClass(speaker) {
-  return `speaker-color-${speaker.colorIndex}`;
-}
-
-/** Κείμενο τμήματος με επισήμανση (<mark>) των εμφανίσεων της αναζήτησης. */
-function renderText(node, text, query) {
-  const needle = normalizeForSearch(query);
-  if (!needle) { node.textContent = text; return; }
-  const haystack = normalizeForSearch(text);
-  const parts = [];
-  let cursor = 0;
-  for (let at = haystack.indexOf(needle); at !== -1; at = haystack.indexOf(needle, at + needle.length)) {
-    if (at > cursor) parts.push(text.slice(cursor, at));
-    parts.push(h('mark', {}, text.slice(at, at + needle.length)));
-    cursor = at + needle.length;
-  }
-  parts.push(text.slice(cursor));
-  node.replaceChildren(...parts);
-}
-
-/** Πεζά χωρίς τόνους, με το ίδιο μήκος με το αρχικό (για σωστές θέσεις επισήμανσης). */
-function normalizeForSearch(text) {
-  return Array.from(String(text ?? '')).map(ch => ch.normalize('NFD').replace(/\p{Mn}/gu, '').toLocaleLowerCase('el').slice(0, 1) || ch).join('');
-}
-
-/** Παράθυρο επιλογής ομιλητή. undefined = ακύρωση, NEW_SPEAKER = νέος ομιλητής. */
-function pickSpeaker(doc, options, currentId) {
-  return new Promise(resolve => {
-    let result;
-    const dialog = h('dialog', { class: 'confirm-dialog speaker-picker' },
-      h('h2', {}, STRINGS.transcript.speakerOfSegment),
-      h('div', { class: 'picker-options' },
-        options.map(option => h('button', {
-          type: 'button',
-          class: option.id === currentId ? 'primary' : 'secondary',
-          onclick: () => { result = option.id; dialog.close(); },
-        }, option.label)),
-        h('button', { type: 'button', class: 'secondary', onclick: () => { result = NEW_SPEAKER; dialog.close(); } }, `${STRINGS.transcript.addSpeaker}…`)),
-      h('div', { class: 'actions' }, h('button', { type: 'button', class: 'secondary', onclick: () => dialog.close() }, STRINGS.common.cancel)));
-    dialog.addEventListener('close', () => { resolve(result); dialog.remove(); });
-    doc.body.append(dialog);
-    dialog.showModal();
-  });
-}
-

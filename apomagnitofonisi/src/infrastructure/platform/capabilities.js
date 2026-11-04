@@ -44,8 +44,11 @@ export async function detectCapabilities(env = globalThis) {
   };
 }
 
-/** Μία ανίχνευση ανά σελίδα (το requestAdapter δεν είναι δωρεάν). */
-export function cachedCapabilities(detect = detectCapabilities) {
+/**
+ * Ανιχνευτής με μία ανίχνευση ανά σελίδα (το requestAdapter δεν είναι δωρεάν).
+ * @returns {() => Promise<DeviceCapabilities>}
+ */
+export function createCachedCapabilityDetector(detect = detectCapabilities) {
   let pending = null;
   return () => (pending ??= detect());
 }

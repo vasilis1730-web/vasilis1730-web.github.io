@@ -18,12 +18,12 @@ export class ScreenWakeLock {
     this.#document = document;
   }
 
-  get supported() {
+  get isSupported() {
     return Boolean(this.#navigator && this.#navigator.wakeLock);
   }
 
   async acquire() {
-    if (!this.supported || this.#wanted) return;
+    if (!this.isSupported || this.#wanted) return;
     this.#wanted = true;
     this.#document.addEventListener('visibilitychange', this.#onVisibility);
     await this.#request();
