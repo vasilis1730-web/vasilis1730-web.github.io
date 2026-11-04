@@ -79,8 +79,8 @@ npm run test:browser   # πραγματικός Chromium πάνω στο dist μ
   πρέπει να γράφουν τους πραγματικούς παρόχους (ElevenLabs, Anthropic, Hugging
   Face, jsDelivr, Cloudflare). Το email επικοινωνίας ζει στο `CONTACT_EMAIL` του
   `src/config/app-info.js` (εκεί και το `SITE_URL`, που διαβάζει και το build) και
-  πρέπει να γράφεται ίδιο στο `privacy.html`. Όσο είναι ακόμη `__CONTACT_EMAIL__`,
-  το `node tools/build-dist.mjs --check-contact` του deploy αρνείται (`docs/DEPLOYMENT.md` §6).
+  πρέπει να γράφεται ίδιο στο `privacy.html`. Σήμερα είναι το `vasilis1730@gmail.com`.
+  Αν λείπει ή διαφέρει, το `node tools/build-dist.mjs --check-contact` του deploy αρνείται (`docs/DEPLOYMENT.md` §6).
 - **Ονόματα αρχείων που παράγει η εφαρμογή για τον χρήστη** (Word, υπότιτλοι,
   κείμενο): με κενά, ποτέ με κάτω παύλες.
 - Workflows: μόνο `test.yml`, `deploy.yml` και το χειροκίνητο `android.yml`.

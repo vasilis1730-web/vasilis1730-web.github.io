@@ -1,8 +1,9 @@
 /**
  * Στοιχεία της εφαρμογής που εμφανίζονται στη διεπαφή και στις εξαγωγές.
  *
- * Το CONTACT_EMAIL μένει σκόπιμα ως __CONTACT_EMAIL__ μέχρι να οριστεί η
- * διεύθυνση επικοινωνίας: το deploy αρνείται να δημοσιεύσει όσο υπάρχει.
+ * Το CONTACT_EMAIL είναι η διεύθυνση επικοινωνίας της πολιτικής απορρήτου
+ * (απόφαση 04/11/2026). Το privacy.html πρέπει να γράφει την ίδια, και το
+ * `node tools/build-dist.mjs --check-contact` του deploy το ελέγχει.
  */
 export const APP_NAME = 'Απομαγνητοφώνηση';
 
@@ -13,4 +14,4 @@ export const SITE_URL = 'https://apomagnitofonisi.texnikes.app/';
 
 export const PRIVACY_PAGE_PATH = './privacy';
 
-export const CONTACT_EMAIL = '__CONTACT_EMAIL__';
+export const CONTACT_EMAIL = 'vasilis1730@gmail.com';
