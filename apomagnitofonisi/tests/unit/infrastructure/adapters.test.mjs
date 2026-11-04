@@ -103,3 +103,26 @@ test('χώρος αποθήκευσης', async () => {
   assert.deepEqual(await none.estimate(), { usageBytes: null, quotaBytes: null });
   assert.equal(await none.requestPersistence(), false);
 });
+
+test('service worker: ξαναφόρτωση μόνο όταν ο χρήστης ζήτησε την ενημέρωση', async () => {
+  const { ServiceWorkerClient, SKIP_WAITING_MESSAGE } = await import('../../../src/infrastructure/platform/service-worker-client.js');
+  const listeners = {};
+  const waiting = { state: 'installed', posted: [], postMessage(m) { this.posted.push(m); }, addEventListener() {} };
+  const container = {
+    controller: {},
+    addEventListener(name, fn) { listeners[name] = fn; },
+    async register() { return { waiting, installing: null, addEventListener() {} }; },
+  };
+  let reloads = 0;
+  let offered = 0;
+  const client = new ServiceWorkerClient({ serviceWorker: container, location: { reload: () => { reloads += 1; } } });
+  await client.register({ scriptUrl: './sw.js', onUpdateReady: () => { offered += 1; } });
+  assert.equal(offered, 1);
+  listeners.controllerchange();
+  assert.equal(reloads, 0, 'η ανάληψη στην πρώτη επίσκεψη δεν ξαναφορτώνει');
+  client.applyUpdate();
+  assert.deepEqual(waiting.posted, [{ type: SKIP_WAITING_MESSAGE }]);
+  listeners.controllerchange();
+  assert.equal(reloads, 1);
+  await new ServiceWorkerClient({ serviceWorker: undefined, location: {} }).register({ scriptUrl: 'x', onUpdateReady() {} });
+});

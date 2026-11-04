@@ -7,8 +7,10 @@
   "scripts": {
     "test": "node --test \"tests/unit/**/*.test.mjs\" \"tests/infra/**/*.test.mjs\"",
     "test:browser": "node --test --test-concurrency=1 \"tests/browser/**/*.test.mjs\"",
+    "test:models": "APOMAGN_REAL_MODELS=1 node --test --test-concurrency=1 tests/browser/app-local-model.test.mjs",
     "build": "node tools/build-dist.mjs",
     "icons": "node tools/make-icons.mjs",
+    "fixtures": "sh tests/fixtures/generate.sh",
     "preview": "wrangler pages dev dist --port 8788"
   },
   "devDependencies": {

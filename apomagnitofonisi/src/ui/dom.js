@@ -2,7 +2,7 @@
  * Μικροί βοηθοί για τη δημιουργία στοιχείων DOM χωρίς innerHTML: όλα τα
  * κείμενα μπαίνουν με textContent, άρα τίποτα από αρχεία, μοντέλα ή παρόχους
  * δεν εκτελείται ποτέ ως HTML. Δεν υπάρχουν inline styles (CSP style-src 'self'):
- * η εμφάνιση ορίζεται με κλάσεις και, όπου χρειάζεται τιμή, με CSS μεταβλητές.
+ * η εμφάνιση ορίζεται μόνο με κλάσεις.
  */
 
 /**
@@ -41,12 +41,6 @@ export function append(parent, children) {
 export function replaceContent(element, ...children) {
   element.replaceChildren();
   return append(element, children);
-}
-
-/** Ορίζει CSS μεταβλητή σε στοιχείο (επιτρέπεται από την CSP, σε αντίθεση με style=""). */
-export function setCssVar(element, name, value) {
-  element.style.setProperty(name, value);
-  return element;
 }
 
 /** Μοναδικό id για σύνδεση label ↔ input. */
