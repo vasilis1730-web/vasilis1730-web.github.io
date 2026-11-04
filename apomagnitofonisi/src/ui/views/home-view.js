@@ -2,7 +2,7 @@
  * Προβολή «Νέα μεταγραφή»: επιλογή αρχείου (ή σύρσιμο, ή κοινή χρήση από
  * άλλη εφαρμογή), μηχανή, γλώσσα, ομιλητές, ποιότητα και έναρξη.
  */
-import { h, field, clear } from '../dom.js';
+import { h, field, replaceContent } from '../dom.js';
 import { STRINGS, downloadSizeHint, errorMessage } from '../strings.js';
 import { formatBytes, formatDuration } from '../formatters.js';
 import { LANGUAGES, AUTO_LANGUAGE_CODE } from '../../config/languages.js';
@@ -27,6 +27,8 @@ export class HomeView {
   #fileError = null;
   #capabilities = null;
   #root = null;
+  #intro = null;
+  #details = null;
 
   /**
    * @param {Object} deps
@@ -47,22 +49,26 @@ export class HomeView {
   }
 
   render() {
-    this.#root = h('section', { class: 'view home-view' });
+    // Η ζώνη επιλογής αρχείου φτιάχνεται μία φορά: έτσι μια ανανέωση της
+    // προβολής (π.χ. όταν έρθουν οι δυνατότητες της συσκευής) δεν αντικαθιστά
+    // ποτέ το <input type="file"> τη στιγμή που ο χρήστης διαλέγει αρχείο.
+    this.#intro = h('div');
+    this.#details = h('div');
+    this.#root = h('section', { class: 'view home-view' }, h('h1', {}, STRINGS.home.title), this.#intro, this.#dropZone(), this.#details);
     this.#draw();
     this.#deps.capabilities().then(caps => { this.#capabilities = caps; this.#draw(); });
     return this.#root;
   }
 
   #draw() {
+    if (!this.#root) return;
     const { job } = this.#deps;
-    clear(this.#root).append(
-      h('h1', {}, STRINGS.home.title),
+    replaceContent(this.#intro,
       job.isRunning ? h('div', { class: 'notice' }, STRINGS.home.jobRunning, ' ', h('a', { href: '#/progress' }, STRINGS.home.showJob)) : null,
-      this.#deps.settings.current.onboardingDismissed ? null : this.#onboarding(),
-      this.#dropZone(),
+      this.#deps.settings.current.onboardingDismissed ? null : this.#onboarding());
+    replaceContent(this.#details,
       this.#file ? this.#fileCard() : null,
-      this.#file ? this.#optionsForm() : null,
-    );
+      this.#file ? this.#optionsForm() : null);
   }
 
   #onboarding() {

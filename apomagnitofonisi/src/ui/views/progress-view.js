@@ -2,7 +2,7 @@
  * Προβολή «Μεταγραφή σε εξέλιξη»: στάδια, ποσοστό, ό,τι έχει ήδη
  * αναγνωριστεί, ακύρωση, και το αποτέλεσμα ή το σφάλμα.
  */
-import { h, clear } from '../dom.js';
+import { h, replaceContent } from '../dom.js';
 import { STRINGS, errorMessage, providerMessage } from '../strings.js';
 import { formatBytes, formatDuration, formatPercent } from '../formatters.js';
 import { formatClock } from '../../domain/time-format.js';
@@ -54,7 +54,7 @@ export class ProgressView {
     const s = STRINGS.progress;
     const running = state.status === 'running';
     const heading = running ? s.title : state.status === 'cancelled' ? s.cancelledTitle : state.status === 'failed' ? s.failedTitle : s.title;
-    clear(this.#root).append(
+    replaceContent(this.#root, 
       h('h1', {}, heading),
       state.fileName ? h('p', { class: 'file-name' }, state.fileName) : null,
       running ? h('p', { class: 'notice' }, s.keepOpen) : null,

@@ -4,7 +4,7 @@
  * πηγαίνει στο σημείο, διόρθωση κειμένου, αλλαγή ομιλητή, αναζήτηση,
  * εξαγωγή, αντιγραφή και κοινή χρήση.
  */
-import { h, clear, field } from '../dom.js';
+import { h, replaceContent, field } from '../dom.js';
 import { STRINGS, matchesFound, errorMessage } from '../strings.js';
 import { formatDateTime, formatDuration } from '../formatters.js';
 import { formatClock } from '../../domain/time-format.js';
@@ -58,7 +58,7 @@ export class TranscriptView {
       this.#deps.document.title = `${transcript.title} | ${STRINGS.appName}`;
       this.#draw();
     }, error => {
-      clear(this.#root).append(h('h1', {}, STRINGS.transcript.notFound), h('p', {}, errorMessage(error)), h('a', { href: '#/history' }, STRINGS.nav.history));
+      replaceContent(this.#root, h('h1', {}, STRINGS.transcript.notFound), h('p', {}, errorMessage(error)), h('a', { href: '#/history' }, STRINGS.nav.history));
     });
     return this.#root;
   }
@@ -72,7 +72,7 @@ export class TranscriptView {
   #draw() {
     const t = this.#transcript;
     const heading = h('h1', {}, t.title);
-    clear(this.#root).append(
+    replaceContent(this.#root, 
       heading,
       h('p', { class: 'meta' }, formatDateTime(t.createdAt), `, ${formatDuration(transcriptDuration(t))}, ${this.#deps.describeEngine(t.engine)}`),
       this.#toolbar(),
@@ -87,7 +87,7 @@ export class TranscriptView {
     const exportsMenu = h('details', { class: 'menu' },
       h('summary', { class: 'button secondary' }, STRINGS.transcript.export),
       h('div', { class: 'menu-items' }, this.#deps.exports.transcriptFormats.map(format =>
-        h('button', { type: 'button', onclick: () => this.#download(format) }, EXPORT_LABELS[format] || format))));
+        h('button', { type: 'button', onclick: () => { exportsMenu.open = false; this.#download(format); } }, EXPORT_LABELS[format] || format))));
     return h('div', { class: 'toolbar' },
       h('a', { class: 'button primary', href: `#/t/${encodeURIComponent(this.#id)}/summary` }, STRINGS.transcript.summaries),
       exportsMenu,

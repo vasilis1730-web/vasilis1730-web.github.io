@@ -3,7 +3,7 @@
  * με ροή κειμένου (Claude), διακοπή, και οι αποθηκευμένες περιλήψεις με
  * εξαγωγή σε Word ή κείμενο, αντιγραφή και διαγραφή.
  */
-import { h, clear, field } from '../dom.js';
+import { h, replaceContent, field } from '../dom.js';
 import { STRINGS, errorMessage, providerMessage } from '../strings.js';
 import { formatDateTime, formatUsd } from '../formatters.js';
 import { renderMarkdown } from '../components/markdown-view.js';
@@ -47,7 +47,7 @@ export class SummaryView {
   render() {
     this.#root = h('section', { class: 'view summary-view' }, h('h1', {}, STRINGS.summary.title));
     this.#deps.library.open(this.#id).then(t => { this.#transcript = t; this.#draw(); }, error => {
-      clear(this.#root).append(h('h1', {}, STRINGS.transcript.notFound), h('p', {}, errorMessage(error)));
+      replaceContent(this.#root, h('h1', {}, STRINGS.transcript.notFound), h('p', {}, errorMessage(error)));
     });
     return this.#root;
   }
@@ -58,7 +58,7 @@ export class SummaryView {
 
   #draw() {
     const t = this.#transcript;
-    clear(this.#root).append(
+    replaceContent(this.#root, 
       h('h1', {}, STRINGS.summary.title),
       h('p', { class: 'meta' }, h('a', { href: `#/t/${encodeURIComponent(this.#id)}` }, `${STRINGS.summary.backToTranscript}: ${t.title}`)),
       this.#form(),

@@ -34,9 +34,13 @@ export function append(parent, children) {
   return parent;
 }
 
-export function clear(element) {
+/**
+ * Αντικαθιστά το περιεχόμενο ενός στοιχείου. Όπως στο h(), τα null/false
+ * παραλείπονται (το εγγενές append θα τα έγραφε ως κείμενο «null»).
+ */
+export function replaceContent(element, ...children) {
   element.replaceChildren();
-  return element;
+  return append(element, children);
 }
 
 /** Ορίζει CSS μεταβλητή σε στοιχείο (επιτρέπεται από την CSP, σε αντίθεση με style=""). */

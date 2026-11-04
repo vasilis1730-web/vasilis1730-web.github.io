@@ -30,6 +30,13 @@ export function formatUsd(amount) {
   return usdFormatter.format(amount < 0.001 ? 0.001 : amount);
 }
 
+const priceFormatter = new Intl.NumberFormat('el-GR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/** «0,10 $» για τιμές ανά εκατομμύριο tokens. */
+export function formatPrice(usd) {
+  return `${priceFormatter.format(usd)} $`;
+}
+
 export function formatPercent(fraction) {
   return `${Math.round(Math.min(1, Math.max(0, fraction)) * 100)}%`;
 }

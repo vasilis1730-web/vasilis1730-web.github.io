@@ -2,7 +2,7 @@
  * Προβολή «Ιστορικό»: οι μεταγραφές της συσκευής, άνοιγμα, διαγραφή,
  * διαγραφή όλων, εισαγωγή αρχείου .json και ο χώρος που χρησιμοποιείται.
  */
-import { h, clear } from '../dom.js';
+import { h, replaceContent } from '../dom.js';
 import { STRINGS, historyCounts, errorMessage } from '../strings.js';
 import { formatBytes, formatDateTime, formatDuration } from '../formatters.js';
 import { confirmAction } from '../components/confirm-dialog.js';
@@ -39,10 +39,10 @@ export class HistoryView {
     try {
       [items, usage] = await Promise.all([library.listNewestFirst(), library.storageUsage()]);
     } catch (error) {
-      clear(this.#root).append(h('h1', {}, STRINGS.history.title), h('p', { class: 'error' }, errorMessage(error)));
+      replaceContent(this.#root, h('h1', {}, STRINGS.history.title), h('p', { class: 'error' }, errorMessage(error)));
       return;
     }
-    clear(this.#root).append(
+    replaceContent(this.#root, 
       h('h1', {}, STRINGS.history.title),
       h('p', { class: 'meta' }, `${STRINGS.history.storage}: ${formatBytes(usage.usageBytes)}`),
       this.#toolbar(items.length),

@@ -251,7 +251,7 @@ button.large { min-height: 52px; padding: 0 28px; font-size: 1.05rem; }
 .toolbar { margin: 0 0 var(--gap); }
 
 .field { margin: 0 0 14px; }
-.field > label { display: block; font-weight: 600; margin: 0 0 6px; }
+.field > label:not(.choice) { display: block; font-weight: 600; margin: 0 0 6px; }
 
 input[type="text"], input[type="password"], input[type="search"], select, textarea {
   font: inherit;
@@ -510,7 +510,8 @@ dialog::backdrop { background: rgb(0 0 0 / 0.45); }
 
 @media (min-width: 720px) {
   h1 { font-size: 1.9rem; }
-  .segment { grid-template-columns: 96px auto 1fr; align-items: start; }
+  .segment { grid-template-columns: 96px minmax(0, 170px) 1fr; align-items: start; }
+  .speaker-chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; line-height: 30px; }
   .segment .text { grid-column: 3; margin: 0; }
   .speaker { grid-template-columns: 18px minmax(200px, 360px) auto; }
   .speaker .meta { grid-column: 3; }

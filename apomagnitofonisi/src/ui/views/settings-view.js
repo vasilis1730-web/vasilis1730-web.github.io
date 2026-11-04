@@ -3,9 +3,9 @@
  * μένουν), μοντέλο Claude, ποιότητα στη συσκευή, άνω τελεία, μοντέλα στη
  * συσκευή, διαγραφή όλων των δεδομένων και πληροφορίες έκδοσης.
  */
-import { h, clear, field } from '../dom.js';
+import { h, replaceContent, field } from '../dom.js';
 import { STRINGS, errorMessage, providerMessage } from '../strings.js';
-import { formatBytes } from '../formatters.js';
+import { formatBytes, formatPrice } from '../formatters.js';
 import { confirmAction } from '../components/confirm-dialog.js';
 import { CLAUDE_MODELS, DEFAULT_CLAUDE_MODEL_ID, LOCAL_QUALITY_PRESET_IDS } from '../../config/models.js';
 import { EXTERNAL_LINKS } from '../../config/external-links.js';
@@ -51,7 +51,7 @@ export class SettingsView {
 
   #draw() {
     const s = STRINGS.settings;
-    clear(this.#root).append(
+    replaceContent(this.#root, 
       h('h1', {}, s.title),
       h('section', { class: 'card', 'aria-labelledby': 'keys-title' },
         h('h2', { id: 'keys-title' }, s.keysTitle),
@@ -137,7 +137,7 @@ export class SettingsView {
         h('input', { type: 'radio', name: 'claude-model', value: model.id, checked: settings.current.claudeModelId === model.id, onchange: () => settings.update({ claudeModelId: model.id }) }),
         h('span', {},
           h('strong', {}, model.label, model.id === DEFAULT_CLAUDE_MODEL_ID ? ` (${STRINGS.settings.claudeModelDefault})` : ''),
-          h('span', { class: 'hint' }, `${model.inputUsdPerMTok} $ / ${model.outputUsdPerMTok} $ ${STRINGS.settings.perMillion}`)))));
+          h('span', { class: 'hint' }, `${formatPrice(model.inputUsdPerMTok)} / ${formatPrice(model.outputUsdPerMTok)} ${STRINGS.settings.perMillion}`)))));
   }
 
   #qualitySelect() {
