@@ -1,0 +1,194 @@
+name: Deploy to Cloudflare Pages
+
+# Μοναδικός δρόμος ανάρτησης της εφαρμογής. Το Pages project ΔΕΝ συνδέεται με
+# Git στο Cloudflare: κάθε push στο main περνά από τα tests, χτίζει το dist/
+# και το ανεβάζει με wrangler. Βλ. docs/DEPLOYMENT.md.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Ένα deployment τη φορά, τα επόμενα περιμένουν αντί να τρέχουν παράλληλα.
+concurrency:
+  group: cloudflare-pages-production
+  cancel-in-progress: false
+
+env:
+  PAGES_PROJECT: apomagnitofonisi
+  # Το custom domain της εφαρμογής. Κάθε deploy ελέγχει ότι απαντά 200 με τα
+  # headers ασφαλείας και ότι τα αρχεία που «δεν φαίνονται» αν λείψουν
+  # (service worker, web manifest, assetlinks) κατεβαίνουν ίδια byte-προς-byte.
+  # Κενό = το domain δεν έχει συνδεθεί ακόμη και ελέγχεται μόνο το pages.dev.
+  PUBLIC_URL: 'https://apomagnitofonisi.texnikes.app'
+  WRANGLER_SEND_METRICS: 'false'
+
+jobs:
+  deploy:
+    # Παραγωγή μόνο από το main, ακόμη και σε χειροκίνητη εκτέλεση.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build dist
+        run: npm run build
+
+      # Η πολιτική απορρήτου μιας δημόσιας εφαρμογής χρειάζεται πραγματικό email
+      # επικοινωνίας. Μέχρι να οριστεί, το dist έχει το σημάδι __CONTACT_EMAIL__
+      # και η ανάρτηση σταματά εδώ.
+      - name: Check privacy contact
+        shell: bash
+        run: |
+          if grep -rIl '__CONTACT_EMAIL__' dist; then
+            echo "::error::Η πολιτική απορρήτου δεν έχει ακόμη email επικοινωνίας (__CONTACT_EMAIL__ στα παραπάνω αρχεία). Βλ. docs/DEPLOYMENT.md §6."
+            exit 1
+          fi
+
+      - name: Check Cloudflare secrets
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          if [ -z "${CLOUDFLARE_API_TOKEN}" ] || [ -z "${CLOUDFLARE_ACCOUNT_ID}" ]; then
+            echo "::error::Λείπουν τα secrets CLOUDFLARE_API_TOKEN ή CLOUDFLARE_ACCOUNT_ID (Settings → Secrets and variables → Actions). Βλ. docs/DEPLOYMENT.md §3."
+            exit 1
+          fi
+
+      - name: Ensure Pages project exists
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Direct Upload project, χωρίς σύνδεση Git. Δημιουργείται μόνο την πρώτη φορά.
+          if npx wrangler pages project list --json | node -e '
+            const text = require("fs").readFileSync(0, "utf8");
+            const projects = JSON.parse(text.slice(text.indexOf("[")));
+            const wanted = process.env.PAGES_PROJECT;
+            process.exit(projects.some(p => (p.name || p["Project Name"]) === wanted) ? 0 : 1);
+          '; then
+            echo "Το Pages project ${PAGES_PROJECT} υπάρχει ήδη."
+          else
+            npx wrangler pages project create "${PAGES_PROJECT}" --production-branch=main
+          fi
+
+      - name: Deploy to Cloudflare Pages
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx wrangler pages deploy dist \
+            --project-name="${PAGES_PROJECT}" \
+            --branch=main \
+            --commit-hash="${GITHUB_SHA}" \
+            --commit-message="${GITHUB_SHA:0:7}"
+
+      - name: Verify production URLs
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Απαντά 200 με τα headers ασφαλείας και cross-origin isolation. Το
+          # πρώτο αίτημα σε νέο deployment μπορεί να δώσει 522 για λίγα
+          # δευτερόλεπτα: βρόχος αναμονής.
+          check() {
+            local url="$1" headers=""
+            for attempt in $(seq 1 12); do
+              if headers=$(curl -sS -D - -o /dev/null --max-time 20 "$url" 2>&1) && grep -qi '^HTTP/[0-9.]* 200' <<<"$headers"; then
+                break
+              fi
+              echo "Αναμονή για το ${url} (προσπάθεια ${attempt})…"
+              printf '%s\n' "$headers" | head -3
+              headers=""
+              sleep 10
+            done
+            [ -n "$headers" ] || { echo "::error::Το ${url} δεν απάντησε 200"; return 1; }
+            echo "$headers"
+            grep -qi '^content-security-policy:' <<<"$headers" || { echo "::error::${url}: λείπει το header Content-Security-Policy"; return 1; }
+            grep -qi '^x-frame-options: *deny' <<<"$headers" || { echo "::error::${url}: λείπει το X-Frame-Options: DENY"; return 1; }
+            grep -qi '^x-content-type-options: *nosniff' <<<"$headers" || { echo "::error::${url}: λείπει το X-Content-Type-Options: nosniff"; return 1; }
+            grep -qi '^cross-origin-opener-policy: *same-origin' <<<"$headers" || { echo "::error::${url}: λείπει το Cross-Origin-Opener-Policy: same-origin"; return 1; }
+            grep -qi '^cross-origin-embedder-policy: *credentialless' <<<"$headers" || { echo "::error::${url}: λείπει το Cross-Origin-Embedder-Policy: credentialless"; return 1; }
+            grep -qi '^x-robots-tag:' <<<"$headers" && { echo "::error::${url}: δεν πρέπει να στέλνει X-Robots-Tag (δημόσια εφαρμογή)"; return 1; }
+            echo "✓ ${url} σερβίρεται με τα headers ασφαλείας"
+          }
+
+          # Τα αρχεία που, αν λείψουν ή μείνουν παλιά, ΔΕΝ φαίνεται: η εφαρμογή
+          # ανοίγει αλλά κολλά σε παλιό service worker ή η εφαρμογή Android
+          # ανοίγει με γραμμή διευθύνσεων. Κατεβαίνουν και συγκρίνονται με ό,τι
+          # μόλις ανέβηκε, με τον ίδιο βρόχο αναμονής (το CDN δεν σερβίρει αμέσως).
+          same() {
+            local url="$1" local_file="$2"
+            for attempt in $(seq 1 12); do
+              if curl -sS --max-time 30 -o /tmp/fetched "$url" && cmp -s /tmp/fetched "$local_file"; then
+                echo "✓ ${url} ταυτίζεται με το ${local_file}"
+                return 0
+              fi
+              echo "Αναμονή διάδοσης για το ${url} (προσπάθεια ${attempt})…"
+              sleep 10
+            done
+            echo "::error::το ${url} διαφέρει από το ${local_file} που μόλις ανέβηκε"
+            return 1
+          }
+
+          # Το Android δέχεται το assetlinks.json μόνο με 200 χωρίς ανακατεύθυνση
+          # και Content-Type application/json, αλλιώς η εφαρμογή ανοίγει με
+          # γραμμή διευθύνσεων (docs/ANDROID.md).
+          assetlinks() {
+            local url="$1/.well-known/assetlinks.json" result=""
+            for attempt in $(seq 1 12); do
+              result=$(curl -sS -o /dev/null --max-time 20 -w '%{http_code} %{content_type}' "$url" 2>&1 || true)
+              case "$result" in
+                "200 application/json"*) echo "✓ ${url} σερβίρεται ως application/json"; return 0 ;;
+              esac
+              echo "Αναμονή για το ${url}: «${result}» (προσπάθεια ${attempt})…"
+              sleep 10
+            done
+            echo "::error::${url}: περίμενα «200 application/json» χωρίς ανακατεύθυνση, πήρα «${result}»"
+            return 1
+          }
+
+          verify() {
+            local base="$1"
+            # Καθαρές διαδρομές: το Pages απαντά 308 στο /x.html και σερβίρει το /x.
+            check "${base}/"
+            check "${base}/privacy"
+            same "${base}/sw.js" dist/sw.js
+            same "${base}/manifest.json" dist/manifest.json
+            same "${base}/sitemap.xml" dist/sitemap.xml
+            same "${base}/robots.txt" dist/robots.txt
+            same "${base}/.well-known/assetlinks.json" dist/.well-known/assetlinks.json
+            assetlinks "${base}"
+          }
+
+          verify "https://${PAGES_PROJECT}.pages.dev"
+          if [ -n "${PUBLIC_URL}" ]; then
+            verify "${PUBLIC_URL}"
+          else
+            echo "Το custom domain δεν έχει οριστεί ακόμη (PUBLIC_URL κενό), ελέγχθηκε μόνο το pages.dev."
+          fi

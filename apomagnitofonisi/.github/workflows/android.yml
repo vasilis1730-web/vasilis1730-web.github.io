@@ -1,0 +1,119 @@
+name: Android (Google Play)
+
+# Χτίζει και υπογράφει την εφαρμογή Android (Trusted Web Activity) της
+# Απομαγνητοφώνησης: gr.rhodes.apomagnitofonisi, που ανοίγει το
+# https://apomagnitofonisi.texnikes.app/. Τρέχει ΜΟΝΟ χειροκίνητα και μόνο από
+# το main. Βγάζει artifact με το .aab για το Play Console και ένα
+# υπογεγραμμένο .apk για απευθείας δοκιμή σε κινητό. Βλ. docs/ANDROID.md.
+#
+# Secrets (Settings → Secrets and variables → Actions), από το upload key του Play
+# (το ίδιο keystore με τις εφαρμογές ΡΟΔΙΟΣ):
+#   ANDROID_KEYSTORE_BASE64    το αρχείο του keystore σε base64
+#   ANDROID_KEYSTORE_PASSWORD  ο κωδικός του keystore
+#   ANDROID_KEY_ALIAS          το alias του κλειδιού μέσα στο keystore
+#   ANDROID_KEY_PASSWORD       ο κωδικός του κλειδιού (κενό = ίδιος με του keystore)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_code:
+        description: 'versionCode για το Play (κενό = αυτόματα ΕΕΕΕΜΜΗΗΩΩ σε ώρα UTC)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-release
+  cancel-in-progress: false
+
+jobs:
+  android:
+    # Υπογραφή μόνο από το main, ακόμη και σε χειροκίνητη εκτέλεση.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Run tests
+        run: npm test
+
+      - name: Check signing secrets
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        shell: bash
+        run: |
+          if [ -z "${ANDROID_KEYSTORE_BASE64}" ] || [ -z "${ANDROID_KEYSTORE_PASSWORD}" ] || [ -z "${ANDROID_KEY_ALIAS}" ]; then
+            echo "::error::Λείπουν τα secrets ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD ή ANDROID_KEY_ALIAS (Settings → Secrets and variables → Actions). Βλ. docs/ANDROID.md §3."
+            exit 1
+          fi
+
+      - name: Version
+        id: version
+        env:
+          VERSION_CODE: ${{ github.event.inputs.version_code }}
+        shell: bash
+        run: node tools/android.mjs version --code "${VERSION_CODE}" | tee -a "${GITHUB_OUTPUT}"
+
+      # Το Android SDK είναι προεγκατεστημένο στον runner, το AGP 8.9 θέλει JDK 17+.
+      - name: Build (Gradle)
+        env:
+          VERSION_CODE: ${{ steps.version.outputs.versionCode }}
+          VERSION_NAME: ${{ steps.version.outputs.versionName }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          export JAVA_HOME="${JAVA_HOME_17_X64:-${JAVA_HOME}}"
+          for app in apomagnitofonisi; do
+            (cd "android/${app}" && ./gradlew --no-daemon \
+              -PapomagnitofonisiVersionCode="${VERSION_CODE}" -PapomagnitofonisiVersionName="${VERSION_NAME}" \
+              assembleRelease bundleRelease)
+          done
+
+      # Το keystore γράφεται μόνο στον προσωρινό φάκελο του runner και σβήνεται
+      # στο επόμενο βήμα ό,τι κι αν γίνει. Οι κωδικοί περνούν στα apksigner και
+      # jarsigner από το περιβάλλον, ποτέ στη γραμμή εντολών.
+      - name: Sign and verify
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          VERSION_CODE: ${{ steps.version.outputs.versionCode }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          export JAVA_HOME="${JAVA_HOME_17_X64:-${JAVA_HOME}}"
+          umask 077
+          printf '%s' "${ANDROID_KEYSTORE_BASE64}" | base64 --decode --ignore-garbage > "${RUNNER_TEMP}/upload.keystore"
+          node tools/android.mjs release --keystore "${RUNNER_TEMP}/upload.keystore" --out android-release --version-code "${VERSION_CODE}"
+
+      - name: Remove keystore
+        if: always()
+        shell: bash
+        run: rm -f "${RUNNER_TEMP}/upload.keystore"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: apomagnitofonisi-android-${{ steps.version.outputs.versionCode }}
+          path: android-release/
+          if-no-files-found: error
+          retention-days: 30

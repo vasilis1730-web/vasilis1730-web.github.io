@@ -1,0 +1,96 @@
+name: Test
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches:
+      - main
+      - 'claude/**'
+      - 'ccr-**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build dist
+        run: npm run build
+
+      # Ο μόνος έλεγχος που αποδεικνύει ότι η CSP δουλεύει: πραγματικός
+      # Chromium πάνω στο dist/ με το πραγματικό _headers (CSP, COOP, COEP).
+      # Οι σελίδες φορτώνουν τις πραγματικές βιβλιοθήκες από το jsDelivr, οπότε
+      # κάθε host που ζητούν πρέπει να είναι στη CSP, αλλιώς ο έλεγχος
+      # κοκκινίζει εδώ και όχι στους χρήστες.
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Browser tests
+        run: npm run test:browser
+
+  # Η εφαρμογή Android (docs/ANDROID.md) χτίζεται σε κάθε αλλαγή, χωρίς
+  # υπογραφή, και το APK ελέγχεται όπως θα το δει το Android: package,
+  # targetSdk 36, κανένα δικαίωμα, host, share target και asset statements.
+  # Έτσι το χειροκίνητο android.yml δεν έχει εκπλήξεις την ώρα της έκδοσης.
+  # Δεν χρειάζεται κανένα secret.
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+
+      - name: Build Android app (unsigned)
+        shell: bash
+        run: |
+          set -euo pipefail
+          export JAVA_HOME="${JAVA_HOME_17_X64:-${JAVA_HOME}}"
+          for app in apomagnitofonisi; do
+            (cd "android/${app}" && ./gradlew --no-daemon \
+              -PapomagnitofonisiVersionCode=2026010100 -PapomagnitofonisiVersionName=ci \
+              assembleRelease bundleRelease)
+          done
+
+      - name: Inspect APK
+        run: node tools/android.mjs inspect --version-code 2026010100
+
+      # Το Gradle ξαναγράφει το res/xml/shortcuts.xml σε κάθε build, το repo
+      # το έχει ήδη σε αυτή τη μορφή. Οι έξοδοι του build είναι στο .gitignore.
+      - name: Build leaves the repository unchanged
+        shell: bash
+        run: |
+          git status --porcelain
+          test -z "$(git status --porcelain)"

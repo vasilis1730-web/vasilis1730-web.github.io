@@ -1,0 +1,68 @@
+{
+  "packageId": "gr.rhodes.apomagnitofonisi",
+  "host": "apomagnitofonisi.texnikes.app",
+  "name": "Απομαγνητοφώνηση",
+  "launcherName": "Απομαγνητοφώνηση",
+  "display": "standalone",
+  "themeColor": "#0E3B43",
+  "themeColorDark": "#0E3B43",
+  "navigationColor": "#0E3B43",
+  "navigationColorDark": "#0E3B43",
+  "navigationDividerColor": "#0E3B43",
+  "navigationDividerColorDark": "#0E3B43",
+  "backgroundColor": "#0E3B43",
+  "enableNotifications": false,
+  "startUrl": "/",
+  "iconUrl": "https://apomagnitofonisi.texnikes.app/assets/icons/icon-512.png",
+  "maskableIconUrl": "https://apomagnitofonisi.texnikes.app/assets/icons/icon-maskable-512.png",
+  "splashScreenFadeOutDuration": 300,
+  "signingKey": {
+    "path": "./android.keystore",
+    "alias": "android"
+  },
+  "appVersionName": "1",
+  "appVersionCode": 1,
+  "shortcuts": [],
+  "generatorApp": "bubblewrap-cli",
+  "webManifestUrl": "https://apomagnitofonisi.texnikes.app/manifest.json",
+  "fallbackType": "customtabs",
+  "features": {},
+  "alphaDependencies": {
+    "enabled": false
+  },
+  "enableSiteSettingsShortcut": true,
+  "isChromeOSOnly": false,
+  "isMetaQuest": false,
+  "fullScopeUrl": "https://apomagnitofonisi.texnikes.app/",
+  "minSdkVersion": 24,
+  "shareTarget": {
+    "action": "https://apomagnitofonisi.texnikes.app/share-target",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "files": [
+        {
+          "name": "media",
+          "accept": [
+            "audio/*",
+            "video/*"
+          ]
+        }
+      ]
+    }
+  },
+  "orientation": "default",
+  "fingerprints": [
+    {
+      "name": "Upload key (ίδιο με των εφαρμογών ΡΟΔΙΟΣ)",
+      "value": "3E:0F:E0:35:CA:50:D6:EF:79:FA:97:2F:6B:1B:F7:77:A4:61:C9:A9:35:A5:DF:BC:42:39:A8:22:FB:1B:5F:79"
+    }
+  ],
+  "additionalTrustedOrigins": [],
+  "retainedBundles": [],
+  "protocolHandlers": [],
+  "fileHandlers": [],
+  "launchHandlerClientMode": "",
+  "displayOverride": [],
+  "appVersion": "1"
+}

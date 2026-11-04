@@ -1,0 +1,27 @@
+# Headers του Cloudflare Pages για όλη την εφαρμογή.
+#
+# Η CSP επιτρέπει μόνο ό,τι χρειάζεται η εφαρμογή:
+#   script-src  cdn.jsdelivr.net για Mediabunny, Transformers.js, Anthropic SDK και ONNX Runtime,
+#               'wasm-unsafe-eval' για το WebAssembly, blob: για το .mjs του ONNX Runtime από την cache
+#   connect-src api.elevenlabs.io (μεταγραφή cloud), api.anthropic.com (περίληψη και πρακτικά),
+#               huggingface.co και *.hf.co (μοντέλα Whisper), cdn.jsdelivr.net (WASM του ONNX Runtime)
+# Κάθε νέο εξωτερικό host μπαίνει εδώ, αλλιώς το npm run build και το npm test κοκκινίζουν.
+#
+# COOP same-origin και COEP credentialless κάνουν τη σελίδα cross-origin isolated,
+# ώστε το ONNX Runtime να τρέχει πολυνηματικό WASM (SharedArrayBuffer).
+/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: credentialless
+  Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; manifest-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://cdn.jsdelivr.net blob:; worker-src 'self' blob:; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self'; connect-src 'self' https://api.elevenlabs.io https://api.anthropic.com https://cdn.jsdelivr.net https://huggingface.co https://*.huggingface.co https://*.hf.co
+  ! Access-Control-Allow-Origin
+
+# Ο service worker και το web manifest ελέγχονται σε κάθε επίσκεψη, ώστε μια
+# νέα έκδοση να φτάνει αμέσως (και στην εφαρμογή Android).
+/sw.js
+  Cache-Control: no-cache
+/manifest.json
+  Cache-Control: no-cache

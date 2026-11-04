@@ -1,0 +1,521 @@
+/*
+ * Απομαγνητοφώνηση: στυλ της εφαρμογής.
+ * Πρώτα για κινητό, χρώματα ως μεταβλητές (φωτεινό και σκούρο θέμα), γραμματοσειρές
+ * του συστήματος (καμία εξωτερική), στόχοι αφής τουλάχιστον 44 px.
+ */
+:root {
+  color-scheme: light dark;
+  --brand: #0e3b43;
+  --brand-strong: #0b2f35;
+  --accent: #0f766e;
+  --accent-contrast: #ffffff;
+  --bg: #f4f7f7;
+  --surface: #ffffff;
+  --surface-2: #eef3f3;
+  --text: #13201f;
+  --text-muted: #4b5b5a;
+  --border: #c9d6d5;
+  --focus: #b45309;
+  --danger: #b42318;
+  --danger-contrast: #ffffff;
+  --warning-bg: #fff4d6;
+  --warning-text: #6b4500;
+  --error-bg: #fde8e7;
+  --error-text: #8a1c12;
+  --success-bg: #e3f5ea;
+  --success-text: #135c33;
+  --mark: #ffe58a;
+  --current: #e0f2f1;
+  --radius: 12px;
+  --gap: 16px;
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.06), 0 2px 8px rgb(0 0 0 / 0.05);
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", "Roboto Mono", Menlo, Consolas, monospace;
+
+  --speaker-0: #0f766e;
+  --speaker-1: #c2410c;
+  --speaker-2: #7c3aed;
+  --speaker-3: #15803d;
+  --speaker-4: #be123c;
+  --speaker-5: #1d4ed8;
+  --speaker-6: #92400e;
+  --speaker-7: #be185d;
+  --speaker-8: #4d7c0f;
+  --speaker-9: #0369a1;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --brand: #0e3b43;
+    --brand-strong: #082a30;
+    --accent: #2dd4bf;
+    --accent-contrast: #062421;
+    --bg: #0c1415;
+    --surface: #142022;
+    --surface-2: #1b2a2c;
+    --text: #e6efee;
+    --text-muted: #a3b5b3;
+    --border: #2d4245;
+    --focus: #fbbf24;
+    --danger: #f87171;
+    --danger-contrast: #2a0805;
+    --warning-bg: #3a2c05;
+    --warning-text: #fde68a;
+    --error-bg: #3b1210;
+    --error-text: #fecaca;
+    --success-bg: #0f2e1d;
+    --success-text: #bbf7d0;
+    --mark: #6b5a12;
+    --current: #17393a;
+    --shadow: none;
+
+    --speaker-0: #2dd4bf;
+    --speaker-1: #fb923c;
+    --speaker-2: #a78bfa;
+    --speaker-3: #4ade80;
+    --speaker-4: #fb7185;
+    --speaker-5: #60a5fa;
+    --speaker-6: #fbbf24;
+    --speaker-7: #f472b6;
+    --speaker-8: #a3e635;
+    --speaker-9: #38bdf8;
+  }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.55 var(--font);
+}
+
+#app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+a { color: var(--accent); }
+a:hover { text-decoration-thickness: 2px; }
+
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+h1, h2, h3 { line-height: 1.25; margin: 0 0 0.5em; }
+h1 { font-size: 1.6rem; }
+h2 { font-size: 1.2rem; }
+h3 { font-size: 1.05rem; }
+p { margin: 0 0 0.75em; }
+
+/* ---------------------------------------------------------------- κέλυφος */
+
+.app-header {
+  background: var(--brand);
+  color: #ffffff;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  padding: 10px max(16px, env(safe-area-inset-left)) 10px max(16px, env(safe-area-inset-right));
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 1.1rem;
+  text-decoration: none;
+  min-height: 44px;
+}
+
+.app-header nav ul {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+}
+
+.app-header nav a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 999px;
+  color: #ffffff;
+  text-decoration: none;
+}
+
+.app-header nav a:hover { background: rgb(255 255 255 / 0.12); }
+.app-header nav a[aria-current="page"] { background: rgb(255 255 255 / 0.2); font-weight: 600; }
+
+main {
+  flex: 1;
+  width: 100%;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 20px 16px 40px;
+}
+
+main:focus { outline: none; }
+h1:focus { outline: none; }
+
+.app-footer {
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  text-align: center;
+  padding: 16px;
+}
+
+/* ---------------------------------------------------------------- βασικά στοιχεία */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 16px;
+  margin: 0 0 var(--gap);
+}
+
+.meta { color: var(--text-muted); font-size: 0.92rem; }
+.hint { color: var(--text-muted); font-size: 0.9rem; margin: 4px 0 0; }
+
+.notice, .warning, .error, .success {
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin: 0 0 var(--gap);
+}
+
+.notice { background: var(--surface-2); }
+.warning { background: var(--warning-bg); color: var(--warning-text); }
+.error { background: var(--error-bg); color: var(--error-text); }
+.success { background: var(--success-bg); color: var(--success-text); }
+
+button, .button {
+  font: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  text-decoration: none;
+  user-select: none;
+}
+
+button:hover, .button:hover { border-color: var(--accent); }
+button:disabled { opacity: 0.55; cursor: not-allowed; }
+
+button.primary, .button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast);
+  font-weight: 600;
+}
+
+button.secondary, .button.secondary { background: var(--surface-2); }
+
+button.danger, .button.danger {
+  background: transparent;
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+button.large { min-height: 52px; padding: 0 28px; font-size: 1.05rem; }
+
+.actions, .toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 12px 0 0;
+}
+
+.toolbar { margin: 0 0 var(--gap); }
+
+.field { margin: 0 0 14px; }
+.field > label { display: block; font-weight: 600; margin: 0 0 6px; }
+
+input[type="text"], input[type="password"], input[type="search"], select, textarea {
+  font: inherit;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+}
+
+textarea { resize: vertical; }
+
+fieldset { border: 0; margin: 0 0 14px; padding: 0; }
+legend { font-weight: 600; margin: 0 0 8px; padding: 0; }
+
+.choice {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 8px 0;
+  min-height: 44px;
+  cursor: pointer;
+}
+
+.choice input { width: 22px; height: 22px; margin: 2px 0 0; flex: none; accent-color: var(--accent); }
+.choice > span { display: flex; flex-direction: column; }
+
+.visually-hidden {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+progress {
+  width: 100%;
+  height: 12px;
+  accent-color: var(--accent);
+}
+
+mark { background: var(--mark); color: inherit; border-radius: 3px; }
+
+/* ---------------------------------------------------------------- νέα μεταγραφή */
+
+.dropzone {
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 28px 16px;
+  text-align: center;
+  margin: 0 0 var(--gap);
+}
+
+.dropzone.dragging { border-color: var(--accent); background: var(--current); }
+.dropzone .button { margin: 6px 0; }
+
+.file-name { font-weight: 600; overflow-wrap: anywhere; margin: 0; }
+
+.onboarding ul { padding-left: 1.2em; }
+
+/* ---------------------------------------------------------------- πρόοδος */
+
+.stages { list-style: none; margin: 0 0 var(--gap); padding: 0; }
+
+.stages li {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin: 0 0 8px;
+}
+
+.stages li.done { color: var(--text-muted); }
+.stages li.done .stage-name::before { content: "\2713  "; color: var(--accent); }
+.stages li.active { border-color: var(--accent); }
+.stages li.active .stage-name { font-weight: 600; }
+.stage-detail { display: grid; gap: 4px; margin-top: 8px; }
+
+.partial-lines { max-height: 50vh; overflow-y: auto; }
+.partial-lines p { margin: 0 0 6px; }
+
+.time { font-family: var(--mono); color: var(--text-muted); font-size: 0.85rem; }
+
+.error-card { border-color: var(--danger); }
+
+/* ---------------------------------------------------------------- μεταγραφή */
+
+.player { width: 100%; max-height: 50vh; }
+
+.speakers ul { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 8px; }
+.speaker { display: grid; grid-template-columns: 18px 1fr; gap: 4px 10px; align-items: center; }
+.speaker .meta { grid-column: 2; }
+.swatch { width: 18px; height: 18px; border-radius: 50%; background: var(--speaker-color, var(--text-muted)); }
+
+.speaker-color-0 { --speaker-color: var(--speaker-0); }
+.speaker-color-1 { --speaker-color: var(--speaker-1); }
+.speaker-color-2 { --speaker-color: var(--speaker-2); }
+.speaker-color-3 { --speaker-color: var(--speaker-3); }
+.speaker-color-4 { --speaker-color: var(--speaker-4); }
+.speaker-color-5 { --speaker-color: var(--speaker-5); }
+.speaker-color-6 { --speaker-color: var(--speaker-6); }
+.speaker-color-7 { --speaker-color: var(--speaker-7); }
+.speaker-color-8 { --speaker-color: var(--speaker-8); }
+.speaker-color-9 { --speaker-color: var(--speaker-9); }
+
+.segments { list-style: none; margin: 0; padding: 0; }
+
+.segment {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 10px;
+  padding: 10px 12px;
+  margin: 0 0 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 5px solid var(--speaker-color, var(--border));
+  border-radius: 10px;
+}
+
+.segment.current { background: var(--current); }
+
+.segment .time {
+  border: 0;
+  background: transparent;
+  padding: 0 4px;
+  min-height: 32px;
+  justify-content: flex-start;
+}
+
+.speaker-chip {
+  justify-self: start;
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border-color: var(--speaker-color, var(--border));
+  color: var(--speaker-color, var(--text));
+  font-weight: 600;
+  font-size: 0.9rem;
+  background: transparent;
+}
+
+.segment .text {
+  grid-column: 1 / -1;
+  margin: 4px 0 0;
+  padding: 4px 6px;
+  border-radius: 6px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.segment .text:focus { background: var(--surface-2); }
+
+.menu { position: relative; }
+.menu > summary { list-style: none; }
+.menu > summary::-webkit-details-marker { display: none; }
+
+.menu-items {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 220px;
+  display: grid;
+  gap: 4px;
+  padding: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
+}
+
+.menu-items button { justify-content: flex-start; border-color: transparent; }
+
+/* ---------------------------------------------------------------- περίληψη */
+
+.summary-output.empty { display: none; }
+
+.markdown h2, .markdown h3, .markdown h4 { margin-top: 1em; }
+.markdown ul, .markdown ol { padding-left: 1.3em; }
+
+.table-scroll { overflow-x: auto; margin: 0 0 12px; }
+
+table { border-collapse: collapse; width: 100%; font-size: 0.95rem; }
+th, td { border: 1px solid var(--border); padding: 6px 8px; text-align: left; vertical-align: top; }
+th { background: var(--surface-2); }
+
+.saved-summary > summary { cursor: pointer; font-weight: 600; min-height: 32px; }
+
+/* ---------------------------------------------------------------- ιστορικό και ρυθμίσεις */
+
+.history-list { list-style: none; margin: 0; padding: 0; }
+.history-title { font-weight: 600; font-size: 1.05rem; overflow-wrap: anywhere; }
+
+.key-editor { border-top: 1px solid var(--border); padding-top: 12px; margin-top: 12px; }
+.key-editor .links { display: flex; gap: 16px; flex-wrap: wrap; }
+
+/* ---------------------------------------------------------------- παράθυρα και μηνύματα */
+
+dialog.confirm-dialog {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  padding: 20px;
+  width: min(92vw, 460px);
+}
+
+dialog::backdrop { background: rgb(0 0 0 / 0.45); }
+
+.picker-options { display: grid; gap: 8px; margin: 12px 0; }
+
+.toast-region {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: max(16px, env(safe-area-inset-bottom));
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  padding: 0 16px;
+  pointer-events: none;
+  z-index: 50;
+}
+
+.toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 560px;
+  width: 100%;
+  padding: 8px 8px 8px 16px;
+  border-radius: 12px;
+  background: var(--text);
+  color: var(--bg);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.25);
+}
+
+.toast-message { flex: 1; }
+.toast-error { background: var(--danger); color: var(--danger-contrast); }
+.toast button { min-height: 40px; background: transparent; color: inherit; border-color: transparent; }
+.toast .toast-action { font-weight: 700; text-decoration: underline; }
+
+/* ---------------------------------------------------------------- σελίδες κειμένου */
+
+.legal { max-width: 760px; }
+.legal h2 { margin-top: 1.6em; }
+.legal nav ol { margin: 0; padding-left: 1.3em; }
+
+@media (min-width: 720px) {
+  h1 { font-size: 1.9rem; }
+  .segment { grid-template-columns: 96px auto 1fr; align-items: start; }
+  .segment .text { grid-column: 3; margin: 0; }
+  .speaker { grid-template-columns: 18px minmax(200px, 360px) auto; }
+  .speaker .meta { grid-column: 3; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
+}
