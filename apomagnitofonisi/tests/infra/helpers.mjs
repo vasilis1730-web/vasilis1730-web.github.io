@@ -4,9 +4,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ROOT } from '../../tools/build-dist.mjs';
-
-export { ROOT };
+import { ROOT } from '../../tools/paths.mjs';
 
 /** Τα αρχεία-είσοδοι της εφαρμογής (Υλοποιητής Α). Όσο δεν υπάρχει κανένα, η εφαρμογή γράφεται ακόμη. */
 export const APP_ENTRY_FILES = Object.freeze(['index.html', 'privacy.html', '404.html', 'manifest.json', 'sw.js']);

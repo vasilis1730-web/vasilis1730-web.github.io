@@ -38,7 +38,7 @@ deploy στο `main` φτάνει αμέσως και στα κινητά**. Ν�
 | `android/apomagnitofonisi/` | Το project του Bubblewrap 1.25.0 με τις διορθώσεις της §9 (σχόλια `ΑΠΟΜΑΓΝΗΤΟΦΩΝΗΣΗ:`) |
 | `android/apomagnitofonisi/twa-manifest.json` | Μοναδική πηγή για package, host, χρώματα, share target και αποτυπώματα |
 | `tools/android/` | `project.mjs` (διαδρομές, twa-manifest), `asset-links.mjs` (το assetlinks.json του build), `play-version.mjs` (versionCode), `apk-inspection.mjs` (έλεγχος APK: package, targetSdk, δικαιώματα, host, share target) |
-| `tools/android.mjs` | Οι εντολές `version`, `inspect` και `release` (υπογραφή, επαλήθευση, σύνοψη) με τα εργαλεία του Android SDK |
+| `tools/android.mjs` | Οι εντολές `version`, `inspect` και `release` (υπογραφή, επαλήθευση, σύνοψη) με τα εργαλεία του Android SDK. Το versionCode δίνεται σε όλες με την ίδια παράμετρο `--version-code`, και κάθε εντολή απορρίπτει όποια παράμετρο δεν είναι δική της |
 | `.github/workflows/android.yml` | Χειροκίνητο, μόνο από το `main`: tests → έκδοση → Gradle → υπογραφή → artifact 30 ημερών |
 | `.github/workflows/test.yml` (job `android`) | Build χωρίς υπογραφή σε κάθε push, `inspect`, και έλεγχος ότι το build δεν αφήνει αλλαγές |
 | `tests/infra/android.test.mjs` | Συνέπεια με το web manifest, Gradle wrapper, αποτυπώματα, κανένα κλειδί στο repository |
@@ -135,6 +135,13 @@ push, το deploy δημοσιεύει το `/.well-known/assetlinks.json` κα�
 Play δέχεται μόνο το πρώτο: τότε δίνεται ρητός αριθμός στο `version_code`. Στην
 πρώτη κυκλοφορία το Play γράφει ότι ο κωδικός είναι «σημαντικά υψηλότερος»:
 **«Συνέχεια ούτως ή άλλως»**.
+
+Τοπικά, η ίδια έκδοση με το workflow:
+
+```sh
+node tools/android.mjs version                           # versionCode από την ώρα UTC
+node tools/android.mjs version --version-code 2026110415 # ρητός αριθμός
+```
 
 ## 6. Δοκιμή με το `.apk`
 

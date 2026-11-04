@@ -94,8 +94,16 @@ curl -s -o /dev/null -w '%{http_code} %{content_type}\n' https://apomagnitofonis
 Μια δημόσια εφαρμογή στο Google Play χρειάζεται πολιτική απορρήτου με τρόπο
 επικοινωνίας. Μέχρι να αποφασιστεί ποιο email θα φαίνεται δημόσια, τα αρχεία
 έχουν το σημάδι `__CONTACT_EMAIL__` (στο `privacy.html` και στο
-`src/config/app-info.js`). Το `npm run build` το επισημαίνει και το `deploy.yml`
-**αρνείται** να ανεβάσει την εφαρμογή όσο υπάρχει. Ένα email αφιερωμένο στην
+`src/config/app-info.js`). Όταν αποφασιστεί:
+
+1. `src/config/app-info.js`: `CONTACT_EMAIL` = η διεύθυνση (μοναδική πηγή για την εφαρμογή και το build).
+2. `privacy.html`: η ίδια διεύθυνση σε **κάθε** σημείο που έχει σήμερα το σημάδι.
+3. `node tools/build-dist.mjs --check-contact` → «✓ email επικοινωνίας: …».
+
+Το `npm run build` γράφει τι εκκρεμεί, και το `deploy.yml` (βήμα «Check privacy
+contact», η ίδια εντολή) **αρνείται** να ανεβάσει την εφαρμογή όσο το
+`CONTACT_EMAIL` δεν είναι πραγματικό email, όσο το `privacy.html` δεν γράφει το
+ίδιο email, ή όσο μένει οποιοδήποτε σημάδι `__ΚΑΤΙ__` σε ό,τι δημοσιεύεται. Ένα email αφιερωμένο στην
 εφαρμογή είναι καλύτερο από το προσωπικό, γιατί εμφανίζεται δημόσια και στη
 σελίδα του Play Store (`docs/PLAY.md` §7).
 

@@ -5,28 +5,31 @@
  */
 import { ENGINE_KINDS } from '../domain/transcript.js';
 import { isSupportedLanguageCode, DEFAULT_LANGUAGE_CODE } from '../config/languages.js';
-import { LOCAL_QUALITY_PRESET_IDS, DEFAULT_CLAUDE_MODEL_ID, findClaudeModel } from '../config/models.js';
+import { AUTO_LOCAL_QUALITY, isLocalQualityChoice, DEFAULT_CLAUDE_MODEL_ID, findClaudeModel } from '../config/models.js';
 import { MAX_EXPECTED_SPEAKERS } from './limits.js';
 
 /**
  * @typedef {Object} Settings
- * @property {'local'|'elevenlabs'} engineKind
+ * @property {import('./ports.js').EngineKind} engineKind
  * @property {string} languageCode
- * @property {{ local: boolean, elevenlabs: boolean }} diarizeByEngine
+ * @property {Record<import('./ports.js').EngineKind, boolean>} diarizeByEngine  διαχωρισμός ομιλητών ανά μηχανή
  * @property {number|null} expectedSpeakers
- * @property {string} localQuality  'auto' | 'fast' | 'balanced' | 'accurate'
+ * @property {import('./ports.js').LocalQualityChoice} localQualityPreset
  * @property {string} claudeModelId
  * @property {boolean} removeAnoTeleia
  * @property {boolean} onboardingDismissed
  */
 
+const ENGINE_KIND_VALUES = Object.values(ENGINE_KINDS);
+
 /** @type {Readonly<Settings>} */
 export const DEFAULT_SETTINGS = Object.freeze({
   engineKind: ENGINE_KINDS.LOCAL,
   languageCode: DEFAULT_LANGUAGE_CODE,
-  diarizeByEngine: Object.freeze({ local: false, elevenlabs: true }),
+  // Στη συσκευή ο διαχωρισμός είναι πειραματικός (και κατεβάζει μοντέλο), στο cloud ακριβής.
+  diarizeByEngine: Object.freeze({ [ENGINE_KINDS.LOCAL]: false, [ENGINE_KINDS.ELEVENLABS]: true }),
   expectedSpeakers: null,
-  localQuality: LOCAL_QUALITY_PRESET_IDS.AUTO,
+  localQualityPreset: AUTO_LOCAL_QUALITY,
   claudeModelId: DEFAULT_CLAUDE_MODEL_ID,
   removeAnoTeleia: true,
   onboardingDismissed: false,
@@ -35,11 +38,12 @@ export const DEFAULT_SETTINGS = Object.freeze({
 const isBoolean = v => typeof v === 'boolean';
 
 const VALIDATORS = Object.freeze({
-  engineKind: v => Object.values(ENGINE_KINDS).includes(v),
+  engineKind: v => ENGINE_KIND_VALUES.includes(v),
   languageCode: v => isSupportedLanguageCode(v),
-  diarizeByEngine: v => v != null && typeof v === 'object' && isBoolean(v.local) && isBoolean(v.elevenlabs),
+  // Μία σημαία ανά μηχανή του ENGINE_KINDS (OO-006): νέα μηχανή δεν θέλει αλλαγή εδώ.
+  diarizeByEngine: v => v != null && typeof v === 'object' && ENGINE_KIND_VALUES.every(kind => isBoolean(v[kind])),
   expectedSpeakers: v => v === null || (Number.isInteger(v) && v >= 1 && v <= MAX_EXPECTED_SPEAKERS),
-  localQuality: v => Object.values(LOCAL_QUALITY_PRESET_IDS).includes(v),
+  localQualityPreset: v => isLocalQualityChoice(v),
   claudeModelId: v => findClaudeModel(v) != null,
   removeAnoTeleia: isBoolean,
   onboardingDismissed: isBoolean,
@@ -61,7 +65,8 @@ export class SettingsService {
   }
 
   /**
-   * Αλλάζει όσες ρυθμίσεις δίνονται. Άκυρη τιμή → RangeError και καμία αλλαγή.
+   * Αλλάζει όσες ρυθμίσεις δίνονται. Άκυρη τιμή → RangeError και καμία αλλαγή
+   * (η διεπαφή δίνει μόνο έγκυρες τιμές, άρα είναι λάθος προγραμματισμού).
    * @param {Partial<Settings>} patch
    * @returns {Readonly<Settings>}
    */
@@ -76,8 +81,8 @@ export class SettingsService {
     return this.#settings;
   }
 
-  /** Επιστροφή στις προεπιλογές (π.χ. στη «Διαγραφή όλων των δεδομένων»). */
-  reset() {
+  /** Διαγραφή των αποθηκευμένων ρυθμίσεων και επιστροφή στις προεπιλογές. */
+  clear() {
     this.#store.clear();
     this.#settings = freeze({ ...DEFAULT_SETTINGS });
     return this.#settings;

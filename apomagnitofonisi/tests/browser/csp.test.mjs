@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { withSite } from './harness.mjs';
-import { ROOT, PUBLIC_DIR } from '../../tools/build-dist.mjs';
+import { ROOT } from '../../tools/paths.mjs';
+import { PUBLIC_DIR } from '../../tools/build-dist.mjs';
 import { cspOf, cspAllows } from '../../tools/headers.mjs';
 
 /* Ο μόνος έλεγχος που αποδεικνύει ότι η CSP δουλεύει: πραγματικός Chromium

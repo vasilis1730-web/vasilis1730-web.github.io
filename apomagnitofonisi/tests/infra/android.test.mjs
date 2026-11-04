@@ -3,13 +3,14 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { ROOT, ANDROID_DIR, ANDROID_APPS, SHARE_TARGET_METADATA, SHARED_MIME_TYPES, readTwaManifest, scopePathOf } from '../../tools/android/project.mjs';
+import { ROOT } from '../../tools/paths.mjs';
+import { ANDROID_DIR, ANDROID_APPS, SHARE_TARGET_METADATA, SHARED_MIME_TYPES, readTwaManifest, scopePathOf } from '../../tools/android/project.mjs';
 import { ASSET_LINK_RELATIONS, assetLinks, assetLinksJson, formatFingerprint } from '../../tools/android/asset-links.mjs';
 import { MAX_VERSION_CODE, versionFor } from '../../tools/android/play-version.mjs';
 import {
   TARGET_SDK, MIN_SDK, parseBadging, parseResources, parseApksignerCerts, parseKeytoolCerts, checkApk, checkShareTarget,
 } from '../../tools/android/apk-inspection.mjs';
-import { parseArgs, releaseSummary } from '../../tools/android.mjs';
+import { parseArgs, releaseSummary, COMMAND_FLAGS } from '../../tools/android.mjs';
 import { read, exists, skipWhileAppPending, tempDir } from './helpers.mjs';
 
 /* Η εφαρμογή Android (Trusted Web Activity, project του Bubblewrap στο
@@ -248,8 +249,25 @@ test('η έκδοση για το Play είναι ΕΕΕΕΜΜΗΗΩΩ σε UTC,
   for (const bad of ['0', '-1', 'abc', '1.5', '2100000001', '1e3']) {
     assert.throws(() => versionFor(new Date(), bad), /μη έγκυρο versionCode/, `απορρίπτεται το ${bad}`);
   }
-  assert.deepEqual(parseArgs(['inspect', '--version-code', '7']), { command: 'inspect', 'version-code': '7' });
-  assert.throws(() => parseArgs(['inspect', '--password', 'x']), /άγνωστη παράμετρος/, 'κανένας κωδικός από τη γραμμή εντολών');
+});
+
+test('το tools/android.mjs δέχεται σε κάθε εντολή μόνο τις δικές της παραμέτρους, με την ίδια --version-code παντού', () => {
+  assert.deepEqual(parseArgs(['version']), { command: 'version' });
+  assert.deepEqual(parseArgs(['version', '--version-code', '']), { command: 'version', versionCode: '' }, 'κενό input του workflow = από την ώρα');
+  assert.deepEqual(parseArgs(['inspect', '--version-code', '7']), { command: 'inspect', versionCode: '7' });
+  assert.deepEqual(parseArgs(['release', '--keystore', 'k', '--out', 'o', '--version-code', '9']),
+    { command: 'release', keystore: 'k', out: 'o', versionCode: '9' });
+  for (const command of Object.keys(COMMAND_FLAGS)) {
+    assert.ok(Object.hasOwn(COMMAND_FLAGS[command], '--version-code'), `${command}: --version-code`);
+  }
+  assert.throws(() => parseArgs(['version', '--code', '1']), /η παράμετρος --code δεν ισχύει για την εντολή version/, 'η παλιά --code απορρίπτεται, δεν αγνοείται');
+  assert.throws(() => parseArgs(['inspect', '--keystore', 'k']), /δεν ισχύει για την εντολή inspect/, 'παράμετρος άλλης εντολής');
+  assert.throws(() => parseArgs(['inspect', '--password', 'x']), /δεν ισχύει/, 'κανένας κωδικός από τη γραμμή εντολών');
+  assert.throws(() => parseArgs(['inspect', '--version-code']), /λείπει η τιμή της --version-code/);
+  assert.throws(() => parseArgs(['inspect', '--version-code', '1', '--version-code', '2']), /δόθηκε δύο φορές/);
+  assert.throws(() => parseArgs(['build']), /άγνωστη εντολή «build»/);
+  assert.throws(() => parseArgs([]), /άγνωστη εντολή/);
+  assert.throws(() => parseArgs(['__proto__']), /άγνωστη εντολή/);
 });
 
 /* Έξοδος των εργαλείων στη μορφή του aapt2 36.0.0, του apksigner 36 και 37 και του
@@ -380,11 +398,11 @@ test('η σύνοψη του release γράφει τα αρχεία, το απο
     app: APP, twa, apk: `/x/${APP}-2026110414.apk`, aab: `/x/${APP}-2026110414.aab`, fingerprint: UPLOAD_KEY, inRepo: true,
     live: { site: 'ναι', google: 'linked' }, badging: { versionName: '2026.11.04.14' },
   };
-  const summary = releaseSummary({ rows: [row], versionCode: 2026110414, tools: '/sdk/build-tools/36.0.0', warnings: ['προσοχή'], problems: [] });
+  const summary = releaseSummary({ rows: [row], versionCode: 2026110414, buildToolsDir: '/sdk/build-tools/36.0.0', warnings: ['προσοχή'], problems: [] });
   assert.match(summary, /^## Android: έκδοση 2026110414 \(2026\.11\.04\.14\)/);
   assert.ok(summary.includes(`| ${APP} | \`${PACKAGE}\` | \`${APP}-2026110414.aab\` | \`${APP}-2026110414.apk\` | \`${UPLOAD_KEY}\` | ναι | ναι | linked |`));
   assert.ok(summary.includes(`https://${HOST}/.well-known/assetlinks.json`));
   assert.match(summary, /Android build-tools: 36\.0\.0\./);
   assert.match(summary, /> ⚠️ προσοχή/);
-  assert.doesNotMatch(releaseSummary({ rows: [{ ...row, inRepo: false }], versionCode: 1, tools: '', warnings: [], problems: ['λάθος'] }), /\| ναι \| ναι \| linked \|$/m);
+  assert.doesNotMatch(releaseSummary({ rows: [{ ...row, inRepo: false }], versionCode: 1, buildToolsDir: '', warnings: [], problems: ['λάθος'] }), /\| ναι \| ναι \| linked \|$/m);
 });

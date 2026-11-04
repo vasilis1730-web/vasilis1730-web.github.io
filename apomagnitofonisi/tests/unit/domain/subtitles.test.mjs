@@ -44,8 +44,8 @@ test('τμήμα χωρίς κείμενο δεν βγάζει υπότιτλο'
 });
 
 test('ισορροπημένο σπάσιμο σε δύο γραμμές', () => {
-  assert.deepEqual(wrapLines('ένα δύο τρία τέσσερα πέντε έξι επτά οκτώ εννέα δέκα έντεκα', 42, 2),
+  assert.deepEqual(wrapLines('ένα δύο τρία τέσσερα πέντε έξι επτά οκτώ εννέα δέκα έντεκα', { maxCharsPerLine: 42, maxLines: 2 }),
     ['ένα δύο τρία τέσσερα πέντε έξι', 'επτά οκτώ εννέα δέκα έντεκα']);
-  assert.deepEqual(wrapLines('σύντομο', 42, 2), ['σύντομο']);
-  assert.deepEqual(wrapLines('α β γ δ', 3, 3), ['α β', 'γ δ']);
+  assert.deepEqual(wrapLines('σύντομο', { maxCharsPerLine: 42, maxLines: 2 }), ['σύντομο']);
+  assert.deepEqual(wrapLines('α β γ δ', { maxCharsPerLine: 3, maxLines: 3 }), ['α β', 'γ δ']);
 });

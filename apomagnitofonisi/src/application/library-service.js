@@ -10,18 +10,18 @@ import { AppError, ERROR_CODES } from './errors.js';
 export class LibraryService {
   #repository;
   #ids;
-  #storage;
+  #deviceStorage;
 
   /**
    * @param {Object} deps
    * @param {import('./ports.js').TranscriptRepository} deps.repository
    * @param {import('./ports.js').IdGenerator} deps.idGenerator
-   * @param {import('./ports.js').StorageEstimator} deps.storage
+   * @param {import('./ports.js').DeviceStorage} deps.deviceStorage
    */
-  constructor({ repository, idGenerator, storage }) {
+  constructor({ repository, idGenerator, deviceStorage }) {
     this.#repository = repository;
     this.#ids = idGenerator;
-    this.#storage = storage;
+    this.#deviceStorage = deviceStorage;
   }
 
   /** @returns {Promise<import('./ports.js').TranscriptListItem[]>} */
@@ -40,8 +40,9 @@ export class LibraryService {
     return this.#repository.remove(id);
   }
 
-  removeAll() {
-    return this.#repository.removeAll();
+  /** Διαγραφή όλων των μεταγραφών (ίδιο ρήμα με τις άλλες αποθήκες, API-015). */
+  clear() {
+    return this.#repository.clear();
   }
 
   /**
@@ -54,7 +55,7 @@ export class LibraryService {
     try {
       transcript = deserializeTranscript(text);
     } catch (error) {
-      if (error instanceof TranscriptFileError) throw new AppError(ERROR_CODES.INVALID_INPUT, error.message, { cause: error });
+      if (error instanceof TranscriptFileError) throw new AppError(ERROR_CODES.INVALID_TRANSCRIPT_FILE, error.message, { cause: error });
       throw error;
     }
     if (await this.#repository.findById(transcript.id)) {
@@ -65,7 +66,7 @@ export class LibraryService {
   }
 
   /** @returns {Promise<import('./ports.js').StorageUsage>} */
-  storageUsage() {
-    return this.#storage.estimate();
+  estimateStorageUsage() {
+    return this.#deviceStorage.estimateUsage();
   }
 }

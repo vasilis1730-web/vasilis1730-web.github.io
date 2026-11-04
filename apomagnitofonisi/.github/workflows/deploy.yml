@@ -55,15 +55,11 @@ jobs:
         run: npm run build
 
       # Η πολιτική απορρήτου μιας δημόσιας εφαρμογής χρειάζεται πραγματικό email
-      # επικοινωνίας. Μέχρι να οριστεί, το dist έχει το σημάδι __CONTACT_EMAIL__
-      # και η ανάρτηση σταματά εδώ.
+      # επικοινωνίας: το CONTACT_EMAIL του src/config/app-info.js, ίδιο στο
+      # privacy.html, και κανένα σημάδι που περιμένει τιμή. Μέχρι τότε η
+      # ανάρτηση σταματά εδώ (docs/DEPLOYMENT.md §6).
       - name: Check privacy contact
-        shell: bash
-        run: |
-          if grep -rIl '__CONTACT_EMAIL__' dist; then
-            echo "::error::Η πολιτική απορρήτου δεν έχει ακόμη email επικοινωνίας (__CONTACT_EMAIL__ στα παραπάνω αρχεία). Βλ. docs/DEPLOYMENT.md §6."
-            exit 1
-          fi
+        run: node tools/build-dist.mjs --check-contact
 
       - name: Check Cloudflare secrets
         env:

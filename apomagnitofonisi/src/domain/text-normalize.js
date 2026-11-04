@@ -19,6 +19,8 @@ const DOT_CHARACTERS = String.fromCharCode(0x387, 0xb7);
 const ANO_TELEIA_PATTERN = new RegExp(`[ \t]*[${DOT_CHARACTERS}][ \t]*`, 'g');
 const CLAUSE_END_OR_DOT = new RegExp(`[.!;?\n${DOT_CHARACTERS}]`);
 const CLAUSE_BOUNDARY = /[.!;?\n]/;
+/** Τέλος πρότασης: τελεία, θαυμαστικό, ερωτηματικό (και «;») ή αποσιωπητικά, ίσως με εισαγωγικά ή παρένθεση. */
+const SENTENCE_END = /[.!?;…][«»"”’)\]]*$/;
 
 /** Επανάληψη που θεωρείται βρόχος: η ίδια ομάδα λέξεων τόσες φορές στη σειρά. */
 const MIN_LOOP_REPEATS = 4;
@@ -45,6 +47,11 @@ const HALLUCINATION_PATTERNS = [
   /^υποτιτλ\S* .*(authorwave|amaraorg)/,
   /^(subtitles|transcription|captions) by /,
 ];
+
+/** Αληθές όταν η λέξη ή η φράση κλείνει πρόταση (OO-009: ένας κανόνας για υπότιτλους και τμήματα). */
+export function endsSentence(text) {
+  return SENTENCE_END.test(String(text ?? ''));
+}
 
 /**
  * Η πλήρης κανονικοποίηση ενός τμήματος.
@@ -172,8 +179,9 @@ function capitalizeFirstLetter(text) {
   return text.slice(0, index) + text[index].toLocaleUpperCase('el') + text.slice(index + 1);
 }
 
-function stripAccents(text) {
-  return text.normalize('NFD').replace(/\p{Mn}/gu, '');
+/** Χωρίς τόνους και διαλυτικά (π.χ. «Ελλάδα» → «Ελλαδα»). */
+export function stripAccents(text) {
+  return String(text).normalize('NFD').replace(/\p{Mn}/gu, '');
 }
 
 /** Μορφή σύγκρισης: πεζά, χωρίς τόνους, χωρίς στίξη, ένα κενό ανάμεσα στις λέξεις. */

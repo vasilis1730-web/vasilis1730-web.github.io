@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { StreamingResampler } from '../../../src/domain/audio/streaming-resampler.js';
-import { ChunkAssembler, findQuietestCut } from '../../../src/domain/audio/chunk-assembler.js';
+import { AudioWindowAssembler, findQuietestCut } from '../../../src/domain/audio/audio-window-assembler.js';
 import { downmixToMono, rms } from '../../../src/domain/audio/pcm.js';
 
 function sine(rate, seconds, freq, amplitude = 0.5) {
@@ -17,7 +17,7 @@ function resampleInChunks(input, inputRate, chunkSizes) {
   let i = 0;
   while (offset < input.length) {
     const size = chunkSizes[i++ % chunkSizes.length];
-    parts.push(r.process(input.subarray(offset, offset + size)));
+    parts.push(r.push(input.subarray(offset, offset + size)));
     offset += size;
   }
   parts.push(r.flush());
@@ -57,7 +57,7 @@ test('44,1 kHz, 8 kHz (αύξηση) και ίδια συχνότητα', () => 
   assert.equal(up.length, 16000);
   assert.ok(Math.abs(rms(up, 500, 15500) - 0.5 / Math.SQRT2) < 0.01);
   const same = new StreamingResampler({ inputRate: 16000 });
-  assert.equal(same.process(new Float32Array([0.1, 0.2])).length, 2);
+  assert.equal(same.push(new Float32Array([0.1, 0.2])).length, 2);
   assert.equal(same.flush().length, 0);
 });
 
@@ -78,7 +78,7 @@ test('σάρωση συχνοτήτων σε μικρά κομμάτια χωρ�
 test('μετά το flush δεν δέχεται άλλα δείγματα', () => {
   const r = new StreamingResampler({ inputRate: 48000 });
   r.flush();
-  assert.throws(() => r.process(new Float32Array(10)));
+  assert.throws(() => r.push(new Float32Array(10)));
   assert.throws(() => new StreamingResampler({ inputRate: 0 }), RangeError);
 });
 
@@ -102,7 +102,7 @@ function speechWithPauses(seconds, pauseEverySec) {
 
 test('τα παράθυρα κόβονται σε παύση ανάμεσα σε 18 και 28 s και καλύπτουν όλο τον ήχο', () => {
   const audio = speechWithPauses(70, 21);
-  const assembler = new ChunkAssembler();
+  const assembler = new AudioWindowAssembler();
   const windows = [];
   for (let i = 0; i < audio.length; i += 4000) windows.push(...assembler.push(audio.subarray(i, i + 4000)));
   windows.push(...assembler.flush());
@@ -121,25 +121,25 @@ test('τα παράθυρα κόβονται σε παύση ανάμεσα σε
 });
 
 test('σιωπηλό παράθυρο σημειώνεται και μικρή σιωπηλή ουρά πετιέται', () => {
-  const assembler = new ChunkAssembler();
+  const assembler = new AudioWindowAssembler();
   const silent = assembler.push(new Float32Array(16000 * 30));
   assert.equal(silent.length, 1);
   assert.equal(silent[0].isSilent, true);
   const rest = assembler.flush();
   assert.equal(rest.length, 1, 'ουρά 2 s: βγαίνει, σημειωμένη ως σιωπή');
   assert.equal(rest[0].isSilent, true);
-  const tiny = new ChunkAssembler();
+  const tiny = new AudioWindowAssembler();
   tiny.push(new Float32Array(1000));
   assert.deepEqual(tiny.flush(), [], 'σιωπηλή ουρά κάτω από 0,3 s πετιέται');
 });
 
 test('το τέλος της ροής βγαίνει πάντα, ακόμη και μικρό, αν έχει ήχο', () => {
-  const assembler = new ChunkAssembler();
+  const assembler = new AudioWindowAssembler();
   assembler.push(sine(16000, 0.1, 300));
   const tail = assembler.flush();
   assert.equal(tail.length, 1);
   assert.equal(tail[0].samples.length, 1600);
-  assert.throws(() => new ChunkAssembler({ minWindowSec: 30, maxWindowSec: 28 }), RangeError);
+  assert.throws(() => new AudioWindowAssembler({ minWindowSec: 30, maxWindowSec: 28 }), RangeError);
 });
 
 test('το πιο ήσυχο σημείο', () => {

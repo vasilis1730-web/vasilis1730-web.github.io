@@ -3,8 +3,18 @@
  * συσκευή του, έλεγχος εγκυρότητας και επιλογή αν μένουν στη συσκευή ή μόνο
  * για την τρέχουσα καρτέλα. Η εφαρμογή δεν έχει δικό της server: τα κλειδιά
  * πηγαίνουν μόνο στον πάροχο τον οποίο αφορούν.
+ *
+ * @typedef {typeof KEY_PROVIDERS[keyof typeof KEY_PROVIDERS]} KeyProvider
  */
-import { AppError, ERROR_CODES, toAppError } from './errors.js';
+import { AppError, ERROR_CODES, INPUT_ISSUES, invalidInput, toAppError } from './errors.js';
+
+/** Οι πάροχοι κλειδιών (API-004): ένα κλειστό σύνολο, ποτέ ελεύθερα strings. */
+export const KEY_PROVIDERS = Object.freeze({
+  ELEVENLABS: 'elevenlabs',
+  ANTHROPIC: 'anthropic',
+});
+
+const PROVIDERS = new Set(Object.values(KEY_PROVIDERS));
 
 export class ApiKeyService {
   #store;
@@ -17,35 +27,38 @@ export class ApiKeyService {
    */
   constructor({ keyStore, verifiers }) {
     this.#store = keyStore;
-    this.#verifiers = new Map(verifiers.map(v => [v.provider, v]));
+    this.#verifiers = new Map(verifiers.map(v => [requireProvider(v.provider), v]));
   }
 
-  /** @param {import('./ports.js').KeyProvider} provider */
+  /** @param {KeyProvider} provider */
   hasKey(provider) {
-    return Boolean(this.#store.getKey(provider));
+    return Boolean(this.#store.getKey(requireProvider(provider)));
   }
 
   /** Οι τελευταίοι 4 χαρακτήρες, για να αναγνωρίζει ο χρήστης ποιο κλειδί έχει βάλει. */
   keyHint(provider) {
-    const key = this.#store.getKey(provider);
+    const key = this.#store.getKey(requireProvider(provider));
     return key ? key.slice(-4) : null;
   }
 
+  /** Αποθήκευση. Κενό κλειδί ή κλειδί με κενά → INVALID_INPUT με την αιτία. */
   saveKey(provider, key) {
+    requireProvider(provider);
     const clean = String(key ?? '').trim();
-    if (!clean || /\s/.test(clean)) throw new AppError(ERROR_CODES.INVALID_INPUT, 'το κλειδί είναι κενό ή έχει κενά');
+    if (!clean) throw invalidInput(INPUT_ISSUES.EMPTY_KEY, 'κενό κλειδί');
+    if (/\s/.test(clean)) throw invalidInput(INPUT_ISSUES.KEY_WHITESPACE, 'το κλειδί έχει κενά');
     this.#store.setKey(provider, clean);
   }
 
   removeKey(provider) {
-    this.#store.removeKey(provider);
+    this.#store.removeKey(requireProvider(provider));
   }
 
   /** Ελέγχει το αποθηκευμένο κλειδί (ή αυτό που δίνεται) με ένα φθηνό αίτημα στον πάροχο. */
-  async verify(provider, key = this.#store.getKey(provider)) {
+  async verify(provider, key = this.#store.getKey(requireProvider(provider))) {
+    const verifier = this.#verifiers.get(requireProvider(provider));
+    if (!verifier) throw new RangeError(`δεν υπάρχει έλεγχος για τον πάροχο ${provider}`);
     if (!key) throw new AppError(ERROR_CODES.KEY_MISSING, `λείπει το κλειδί ${provider}`);
-    const verifier = this.#verifiers.get(provider);
-    if (!verifier) throw new AppError(ERROR_CODES.INVALID_INPUT, `άγνωστος πάροχος ${provider}`);
     try {
       await verifier.verify(key);
     } catch (error) {
@@ -53,15 +66,25 @@ export class ApiKeyService {
     }
   }
 
-  setPersistent(persistent) {
-    this.#store.setPersistent(Boolean(persistent));
+  /** @param {import('./ports.js').KeyRetention} retention  'device' ή 'session' */
+  setKeyRetention(retention) {
+    if (retention !== 'device' && retention !== 'session') throw new RangeError(`άγνωστη διατήρηση κλειδιών ${retention}`);
+    this.#store.setKeyRetention(retention);
   }
 
-  isPersistent() {
-    return this.#store.isPersistent();
+  /** @returns {import('./ports.js').KeyRetention} */
+  keyRetention() {
+    return this.#store.keyRetention();
   }
 
-  clearAll() {
-    this.#store.clearAll();
+  /** Διαγραφή όλων των κλειδιών (ίδιο ρήμα με τις άλλες αποθήκες). */
+  clear() {
+    this.#store.clear();
   }
+}
+
+/** Άγνωστος πάροχος είναι λάθος προγραμματισμού (API-004): απορρίπτεται σε κάθε μέθοδο. */
+function requireProvider(provider) {
+  if (!PROVIDERS.has(provider)) throw new RangeError(`άγνωστος πάροχος ${provider}`);
+  return provider;
 }

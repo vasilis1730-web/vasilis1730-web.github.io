@@ -2,6 +2,13 @@
  * Βασικές πράξεις σε PCM float32 (τιμές περίπου στο [-1, 1]).
  */
 
+/**
+ * Η συχνότητα δειγματοληψίας του PCM που ανταλλάσσουν ο αναγνώστης αρχείων
+ * (θύρα MediaReader.readMono16k), τα παράθυρα του Whisper και τα αποτυπώματα
+ * φωνής (CA-003). Μοναδική πηγή της τιμής: το Whisper δέχεται μόνο 16 kHz.
+ */
+export const PCM_SAMPLE_RATE = 16000;
+
 /** Μέσος όρος των καναλιών σε ένα κανάλι. Ένα κανάλι επιστρέφεται ως έχει. */
 export function downmixToMono(planes) {
   if (!planes.length) return new Float32Array(0);

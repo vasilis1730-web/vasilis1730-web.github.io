@@ -129,7 +129,7 @@ export function checkVendorModule({ file = VENDOR_MODULE, text, csp }) {
   const urls = urlLiteralsIn(text);
   if (!urls.length) problems.push(`${file}: δεν βρέθηκε κανένα URL βιβλιοθήκης`);
   for (const { raw, url, line } of urls) {
-    const pinned = pinnedJsdelivrVersion(raw);
+    const pinned = checkJsdelivrPin(raw);
     if (!pinned.ok) problems.push(`${file}:${line}: ${pinned.reason}: ${raw}`);
     if (!cspAllows(csp, 'script-src', url)) problems.push(`${file}:${line}: το script-src της CSP δεν επιτρέπει το ${url.hostname}`);
     if (!cspAllows(csp, 'connect-src', url)) problems.push(`${file}:${line}: το connect-src της CSP δεν επιτρέπει το ${url.hostname}`);
@@ -138,10 +138,12 @@ export function checkVendorModule({ file = VENDOR_MODULE, text, csp }) {
 }
 
 /**
- * Αν ένα URL του jsDelivr ονομάζει πακέτο με ακριβή έκδοση. URL χωρίς πακέτο
- * (π.χ. το πρόθεμα https://cdn.jsdelivr.net/npm/ του service worker) δεν αφορά.
+ * Ελέγχει αν ένα URL του jsDelivr ονομάζει πακέτο με ακριβή έκδοση. URL χωρίς
+ * πακέτο (π.χ. το πρόθεμα https://cdn.jsdelivr.net/npm/ του service worker) δεν αφορά.
+ * @param {string} raw
+ * @returns {{ ok: boolean, reason?: string, packageNamed?: boolean, version?: string }}
  */
-export function pinnedJsdelivrVersion(raw) {
+export function checkJsdelivrPin(raw) {
   if (!/^https:\/\/cdn\.jsdelivr\.net\//i.test(raw)) return { ok: false, reason: 'βιβλιοθήκη εκτός jsDelivr' };
   const match = raw.match(JSDELIVR_PACKAGE_URL);
   if (!match) return { ok: true, packageNamed: false };
@@ -154,7 +156,7 @@ export function pinnedJsdelivrVersion(raw) {
 export function checkVendorUrlsOutsideVendorModule({ file, text }) {
   if (file === VENDOR_MODULE) return [];
   return urlLiteralsIn(text)
-    .filter(({ raw }) => /^https:\/\/cdn\.jsdelivr\.net\//i.test(raw) && pinnedJsdelivrVersion(raw).packageNamed)
+    .filter(({ raw }) => /^https:\/\/cdn\.jsdelivr\.net\//i.test(raw) && checkJsdelivrPin(raw).packageNamed)
     .map(({ raw, line }) => `${file}:${line}: URL βιβλιοθήκης έξω από το ${VENDOR_MODULE}: ${raw}`);
 }
 
@@ -222,9 +224,10 @@ export function checkHtml({ file, text, csp }) {
 /**
  * Όλοι οι έλεγχοι για τα αρχεία που δημοσιεύονται: [{ path, text }] με path
  * σχετικό με τη ρίζα του repository, και selfOrigins οι διευθύνσεις της ίδιας
- * της εφαρμογής. Επιστρέφει τη λίστα προβλημάτων.
+ * της εφαρμογής.
+ * @returns {string[]} τα προβλήματα (κενή λίστα = εντάξει)
  */
-export function inspectPublishedSources({ files, csp, navigationHosts = NAVIGATION_HOSTS, selfOrigins = [] }) {
+export function findPublishedSourceProblems({ files, csp, navigationHosts = NAVIGATION_HOSTS, selfOrigins = [] }) {
   const problems = [];
   for (const { path: file, text } of files) {
     for (const hit of findForbiddenCharacters(text)) problems.push(`${file}:${hit.line}: ${hit.name} «${hit.excerpt}»`);

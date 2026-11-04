@@ -4,7 +4,7 @@
  *
  * - Το αρχείο διαβάζεται τμηματικά (BlobSource): ένα βίντεο 2 GB δεν φορτώνεται
  *   ποτέ ολόκληρο στη μνήμη.
- * - Ο ήχος αποκωδικοποιείται σε ροή και γίνεται PCM 16 kHz ένα κανάλι
+ * - Ο ήχος αποκωδικοποιείται σε ροή και γίνεται PCM (PCM_SAMPLE_RATE) ένα κανάλι
  *   (StreamingResampler), όπως τον θέλει το Whisper. Κενά στη ροή γεμίζουν με
  *   σιωπή και ήχος που ξεκινά αργότερα από το βίντεο μετατοπίζεται, ώστε οι
  *   χρόνοι της μεταγραφής να ταιριάζουν με το αρχείο (σωστοί υπότιτλοι).
@@ -13,9 +13,7 @@
  */
 import { AppError, ERROR_CODES, throwIfAborted } from '../../application/errors.js';
 import { StreamingResampler } from '../../domain/audio/streaming-resampler.js';
-import { downmixToMono } from '../../domain/audio/pcm.js';
-
-export const PCM_SAMPLE_RATE = 16000;
+import { downmixToMono, PCM_SAMPLE_RATE } from '../../domain/audio/pcm.js';
 const UPLOAD_BITRATE = 32_000;
 const UPLOAD_SAMPLE_RATE = 48_000;
 /** Κενό στη ροή πάνω από αυτό γεμίζει με σιωπή (s). */
@@ -75,7 +73,7 @@ export class MediabunnyMediaReader {
           resampler ??= new StreamingResampler({ inputRate: sample.sampleRate, outputRate: PCM_SAMPLE_RATE });
           const { pcm, endTime } = alignedSamples(sample, expectedTime);
           expectedTime = endTime;
-          const output = pcm.length ? resampler.process(pcm) : null;
+          const output = pcm.length ? resampler.push(pcm) : null;
           if (output && output.length) yield output;
         } finally {
           sample.close();
@@ -93,13 +91,18 @@ export class MediabunnyMediaReader {
   }
 
   /**
-   * Μόνο ο ήχος ως Ogg Opus για αποστολή. Αν ο browser δεν κωδικοποιεί Opus ή
-   * η μετατροπή δεν γίνεται, επιστρέφεται το αρχικό αρχείο.
+   * Μόνο ο ήχος ως Ogg Opus για αποστολή. Όταν ο browser δεν κωδικοποιεί Opus
+   * ή η μετατροπή δεν είναι δυνατή για αυτό το αρχείο, επιστρέφεται
+   * `{ audio: media, compacted: false }`. Σφάλματα ανάγνωσης πετιούνται: το τι
+   * θα σταλεί τότε το αποφασίζει η μηχανή (API-005).
+   *
+   * @returns {Promise<import('../../application/ports.js').CompactAudio>}
    */
-  async extractCompactAudio(media, { signal, onProgress } = {}) {
+  async extractCompactAudio(media, { signal, onFraction } = {}) {
     const mb = await this.#loadMediabunny();
     const settings = { numberOfChannels: 1, sampleRate: UPLOAD_SAMPLE_RATE };
-    if (!(await mb.canEncodeAudio('opus', { ...settings, quality: new mb.Quality({ bitrate: UPLOAD_BITRATE }) }))) return media;
+    const notCompacted = { audio: media, compacted: false };
+    if (!(await mb.canEncodeAudio('opus', { ...settings, quality: new mb.Quality({ bitrate: UPLOAD_BITRATE }) }))) return notCompacted;
     const input = openInput(mb, media);
     const output = new mb.Output({ format: new mb.OggOutputFormat(), target: new mb.BufferTarget() });
     let conversion = null;
@@ -113,12 +116,12 @@ export class MediabunnyMediaReader {
         audio: { codec: 'opus', ...settings, quality: new mb.Quality({ bitrate: UPLOAD_BITRATE }) },
         showWarnings: false,
       });
-      if (!conversion.isValid) return media;
-      conversion.onProgress = progress => onProgress?.(progress);
+      if (!conversion.isValid) return notCompacted;
+      conversion.onProgress = progress => onFraction?.(progress);
       signal?.addEventListener('abort', cancel, { once: true });
       throwIfAborted(signal);
       await conversion.execute();
-      return new Blob([output.target.buffer], { type: 'audio/ogg' });
+      return { audio: new Blob([output.target.buffer], { type: 'audio/ogg' }), compacted: true };
     } catch (error) {
       if ((signal && signal.aborted) || error instanceof mb.ConversionCanceledError) throw new AppError(ERROR_CODES.CANCELLED, 'ακυρώθηκε', { cause: error });
       throw toMediaError(mb, error);

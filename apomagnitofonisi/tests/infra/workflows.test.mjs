@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { ANDROID_APPS } from '../../tools/android/project.mjs';
-import { PAGES_PROJECT, PRODUCTION_URL, CONTACT_PLACEHOLDER } from '../../tools/build-dist.mjs';
-import { ROOT, read } from './helpers.mjs';
+import { ROOT } from '../../tools/paths.mjs';
+import { PAGES_PROJECT, PRODUCTION_URL } from '../../tools/build-dist.mjs';
+import { read } from './helpers.mjs';
 
 /* Τα workflows του GitHub Actions: μόνο τα τρία που χρειάζονται, με actions
    καρφιτσωμένα σε πλήρες SHA, ελάχιστα δικαιώματα και secrets μόνο μέσω env:
@@ -78,8 +79,9 @@ test('το deploy.yml ανεβάζει μόνο από το main, μόνο με 
   assert.match(text, /if: github\.ref == 'refs\/heads\/main'/, 'παραγωγή μόνο από το main');
   assert.match(text, new RegExp(`PAGES_PROJECT: ${PAGES_PROJECT}\\n`), 'το Pages project της εφαρμογής');
   assert.match(text, new RegExp(`PUBLIC_URL: '${PRODUCTION_URL.replace(/[.]/g, '\\.')}'`), 'το custom domain της εφαρμογής');
-  assert.match(text, /run: npm test\n[\s\S]*run: npm run build\n[\s\S]*Check privacy contact[\s\S]*wrangler pages deploy dist/, 'tests → build → έλεγχος email → deploy');
-  assert.ok(text.includes(`grep -rIl '${CONTACT_PLACEHOLDER}' dist`), 'το deploy αρνείται όσο λείπει το email επικοινωνίας της πολιτικής απορρήτου');
+  assert.match(text, /run: npm test\n[\s\S]*run: npm run build\n[\s\S]*- name: Check privacy contact\n\s+run: node tools\/build-dist\.mjs --check-contact\n[\s\S]*wrangler pages deploy dist/,
+    'tests → build → έλεγχος email επικοινωνίας (tools/build-dist.mjs, πηγή το src/config/app-info.js) → deploy');
+  assert.doesNotMatch(text, /__CONTACT_EMAIL__|grep -rIl/, 'το σημάδι του email δεν ξαναγράφεται στο workflow');
   assert.match(text, /group: cloudflare-pages-production\n\s+cancel-in-progress: false/);
   for (const pattern of ["'^content-security-policy:'", "'^x-frame-options: *deny'", "'^x-content-type-options: *nosniff'",
     "'^cross-origin-opener-policy: *same-origin'", "'^cross-origin-embedder-policy: *credentialless'"]) {
@@ -98,8 +100,9 @@ test('το android.yml υπογράφει μόνο χειροκίνητα, μό�
   assert.match(android, /if: github\.ref == 'refs\/heads\/main'/, 'και μόνο από το main');
   assert.match(android, /run: npm test\n[\s\S]*gradlew[\s\S]*node tools\/android\.mjs release/, 'tests → Gradle → υπογραφή');
   assert.match(android, new RegExp(`for app in ${ANDROID_APPS.join(' ')}; do`), 'χτίζει και υπογράφει όλες τις εφαρμογές του tools/android.mjs');
-  assert.match(android, /VERSION_CODE: \$\{\{ github\.event\.inputs\.version_code \}\}\n[\s\S]*node tools\/android\.mjs version --code "\$\{VERSION_CODE\}"/,
-    'το versionCode περνά από το tools/android.mjs, που το ελέγχει');
+  assert.match(android, /VERSION_CODE: \$\{\{ github\.event\.inputs\.version_code \}\}\n[\s\S]*node tools\/android\.mjs version --version-code "\$\{VERSION_CODE\}"/,
+    'το versionCode περνά από το tools/android.mjs (ίδια παράμετρος --version-code σε όλες τις εντολές), που το ελέγχει');
+  assert.doesNotMatch(android, /tools\/android\.mjs [a-z]+ [^\n]*--code\b/, 'καμία παλιά παράμετρος --code');
   assert.match(android, /-PapomagnitofonisiVersionCode="\$\{VERSION_CODE\}" -PapomagnitofonisiVersionName="\$\{VERSION_NAME\}"/);
   assert.match(android, /umask 077\n\s+printf '%s' "\$\{ANDROID_KEYSTORE_BASE64\}" \| base64 --decode --ignore-garbage > "\$\{RUNNER_TEMP\}\/upload\.keystore"/,
     'το keystore γράφεται μόνο στον προσωρινό φάκελο, αναγνώσιμο μόνο από τον χρήστη του runner');

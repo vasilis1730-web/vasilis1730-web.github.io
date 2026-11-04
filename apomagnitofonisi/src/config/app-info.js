@@ -13,6 +13,4 @@ export const SITE_URL = 'https://apomagnitofonisi.texnikes.app/';
 
 export const PRIVACY_PAGE_PATH = './privacy';
 
-export const RESPONSIBLE_PERSON = 'Βασίλειος Διακολιός';
-
 export const CONTACT_EMAIL = '__CONTACT_EMAIL__';

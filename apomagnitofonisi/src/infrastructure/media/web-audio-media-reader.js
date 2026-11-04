@@ -1,13 +1,12 @@
 /**
  * Εφεδρική ανάγνωση με το Web Audio API (decodeAudioData) για μορφές που δεν
  * διαβάζει το Mediabunny. Αποκωδικοποιεί όλο το αρχείο στη μνήμη (1 ώρα ≈
- * 230 MB στα 16 kHz), άρα είναι μόνο για ό,τι δεν διαβάζεται αλλιώς. Μόνο στο
+ * 230 MB στα 16 kHz του PCM_SAMPLE_RATE), άρα είναι μόνο για ό,τι δεν διαβάζεται αλλιώς. Μόνο στο
  * κύριο νήμα (το OfflineAudioContext δεν υπάρχει σε workers).
  * Υλοποιεί τη θύρα MediaReader.
  */
 import { AppError, ERROR_CODES, throwIfAborted } from '../../application/errors.js';
-import { downmixToMono } from '../../domain/audio/pcm.js';
-import { PCM_SAMPLE_RATE } from './mediabunny-media-reader.js';
+import { downmixToMono, PCM_SAMPLE_RATE } from '../../domain/audio/pcm.js';
 
 const CHUNK_SECONDS = 10;
 
@@ -38,9 +37,12 @@ export class WebAudioMediaReader {
     this.#decoded.delete(media);
   }
 
-  /** Χωρίς κωδικοποιητή: στέλνεται το αρχικό αρχείο. */
+  /**
+   * Χωρίς κωδικοποιητή: δεν γίνεται συμπίεση.
+   * @returns {Promise<import('../../application/ports.js').CompactAudio>}
+   */
   async extractCompactAudio(media) {
-    return media;
+    return { audio: media, compacted: false };
   }
 
   #decode(media) {

@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   createTranscript, speakersFromKeys, setTitle, renameSpeaker, addSpeaker, assignSpeaker, editSegmentText,
-  addSummary, removeSummary, speakerTalkTime, transcriptDuration, segmentIndexAt, plainText, TranscriptRuleError,
-  SPEAKER_COLOR_COUNT,
+  addSummary, removeSummary, speakerTalkTime, transcriptDuration, segmentIndexAt, TranscriptRuleError,
+  SPEAKER_COLOR_COUNT, TRANSCRIPT_RULES,
 } from '../../../src/domain/transcript.js';
 
 const T0 = '2026-11-04T10:00:00.000Z';
@@ -85,6 +85,8 @@ test('περιλήψεις: η πιο πρόσφατη πρώτη, χωρίς δ
   t = addSummary(t, { id: 'a', kind: 'brief', model: 'm', createdAt: T1, text: 'Α2' }, T1);
   assert.deepEqual(t.summaries.map(s => s.id), ['a', 'b']);
   assert.deepEqual(removeSummary(t, 'a', T1).summaries.map(s => s.id), ['b']);
+  assert.throws(() => removeSummary(t, 'nope', T1), e => e instanceof TranscriptRuleError && e.rule === TRANSCRIPT_RULES.UNKNOWN_SUMMARY,
+    'άγνωστη περίληψη: λάθος, όπως στα τμήματα και στους ομιλητές');
   assert.throws(() => addSummary(t, { id: 'c', kind: 'poem', model: 'm', createdAt: T1, text: '' }, T1), TranscriptRuleError);
 });
 
@@ -98,7 +100,16 @@ test('χρόνος ομιλίας, διάρκεια, τμήμα σε χρόνο 
   assert.equal(segmentIndexAt(t, 0), 0);
   assert.equal(segmentIndexAt(t, 9.5), 0, 'στην παύση μένει το προηγούμενο');
   assert.equal(segmentIndexAt(t, 12), 1);
-  assert.equal(plainText(t), 'Καλημέρα σε όλους.\nΣυμφωνώ.');
+});
+
+test('κανόνες με αιτία: κενό όνομα ομιλητή (του χρήστη) και άγνωστα αναγνωριστικά (του κώδικα)', () => {
+  const t = sample();
+  assert.throws(() => renameSpeaker(t, 'S1', '   ', T1), e => e.rule === TRANSCRIPT_RULES.EMPTY_SPEAKER_NAME);
+  assert.throws(() => addSpeaker(t, '', T1), e => e.rule === TRANSCRIPT_RULES.EMPTY_SPEAKER_NAME);
+  assert.throws(() => renameSpeaker(t, 'S9', 'x', T1), e => e.rule === TRANSCRIPT_RULES.UNKNOWN_SPEAKER);
+  assert.throws(() => editSegmentText(t, 'nope', 'x', T1), e => e.rule === TRANSCRIPT_RULES.UNKNOWN_SEGMENT);
+  const untitled = createTranscript({ id: 'u', title: ' ', createdAt: T0, source: { fileName: '' }, engine: { kind: 'local', model: 'm' } });
+  assert.equal(untitled.title, '', 'χωρίς τίτλο και όνομα αρχείου ο τίτλος μένει κενός (τον δείχνει η διεπαφή)');
 });
 
 test('ομιλητές από κλειδιά μηχανής με τη σειρά που μιλούν', () => {

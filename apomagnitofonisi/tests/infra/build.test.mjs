@@ -2,10 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { ROOT } from '../../tools/paths.mjs';
 import {
-  ROOT, PUBLISHED, PUBLIC_DIR, ASSET_LINKS, PAGES_PROJECT, DEFAULT_SITE_URL, PRODUCTION_URL, CONTACT_PLACEHOLDER,
-  build, inspect, sitemapFor, robotsFor, siteUrlFrom, walk, filesWithContactPlaceholder,
+  PUBLISHED, PUBLIC_DIR, ASSET_LINKS, PAGES_PROJECT, DEFAULT_SITE_URL, PRODUCTION_URL, PRIVACY_PAGE,
+  build, findBuildProblems, findContactProblems, sitemapFor, robotsFor, siteUrlFrom, listFiles, parseArgs,
 } from '../../tools/build-dist.mjs';
+import { SITE_URL, CONTACT_EMAIL } from '../../src/config/app-info.js';
 import { ANDROID_DIR, ANDROID_APPS } from '../../tools/android/project.mjs';
 import { assetLinksJson } from '../../tools/android/asset-links.mjs';
 import { parseHeaderRules, headersFor, cspOf, directiveSources } from '../../tools/headers.mjs';
@@ -32,6 +34,9 @@ const EXPECTED_CSP = Object.freeze({
     'https://huggingface.co', 'https://*.huggingface.co', 'https://*.hf.co'],
 });
 
+/** Το σημάδι του email επικοινωνίας όσο δεν έχει οριστεί (όπως στο src/config/app-info.js και στο privacy.html). */
+const CONTACT_TOKEN = '__CONTACT_EMAIL__';
+
 /** Ένα ελάχιστο repository σε προσωρινό φάκελο, για να δοκιμαστεί το build χωρίς την πραγματική εφαρμογή. */
 function miniRepository(t) {
   const root = tempDir(t, 'apomagnitofonisi-build-');
@@ -40,7 +45,7 @@ function miniRepository(t) {
     fs.writeFileSync(path.join(root, file), text);
   };
   write('index.html', '<!doctype html><title>x</title><script type="module" src="./src/main.js"></script>');
-  write('privacy.html', `<!doctype html><title>x</title><p>${CONTACT_PLACEHOLDER}</p>`);
+  write('privacy.html', `<!doctype html><title>x</title><p>${CONTACT_TOKEN}</p>`);
   write('404.html', '<!doctype html><title>404</title>');
   write('manifest.json', '{"name":"x"}');
   write('sw.js', "self.addEventListener('fetch', () => {});");
@@ -64,7 +69,7 @@ test('το dist περιέχει μόνο ό,τι σερβίρεται, αμετ
   const expected = [];
   for (const entry of PUBLISHED) {
     const full = path.join(ROOT, entry);
-    if (fs.statSync(full).isDirectory()) expected.push(...walk(full).map(f => `${entry}/${f}`));
+    if (fs.statSync(full).isDirectory()) expected.push(...listFiles(full).map(f => `${entry}/${f}`));
     else expected.push(entry);
   }
   expected.push(...fs.readdirSync(path.join(ROOT, PUBLIC_DIR)), 'sitemap.xml', 'robots.txt', ASSET_LINKS);
@@ -79,14 +84,52 @@ test('το dist περιέχει μόνο ό,τι σερβίρεται, αμετ
   assert.equal(fs.readFileSync(path.join(out, ASSET_LINKS), 'utf8'), assetLinksJson(), 'το assetlinks.json από το twa-manifest.json');
 });
 
-test('το build σε ελάχιστο repository: δημοσιεύει μόνο τα PUBLISHED και δείχνει τι εκκρεμεί για το deploy', t => {
+test('το build σε ελάχιστο repository: δημοσιεύει μόνο τα PUBLISHED', t => {
   const { root } = miniRepository(t);
   const out = path.join(root, 'dist');
   const { files } = build({ root, out, siteUrl: PRODUCTION_URL });
   assert.ok(files.includes('src/main.js') && files.includes('_headers') && files.includes(ASSET_LINKS));
   assert.ok(!files.some(f => f.startsWith('tests/')), 'τα tests δεν δημοσιεύονται');
   assert.match(fs.readFileSync(path.join(out, 'sitemap.xml'), 'utf8'), new RegExp(`<loc>${PRODUCTION_URL}/privacy</loc>`));
-  assert.deepEqual(filesWithContactPlaceholder(out), ['privacy.html'], 'το deploy θα αρνηθεί όσο λείπει το email επικοινωνίας');
+});
+
+test('το deploy αρνείται χωρίς πραγματικό email επικοινωνίας, ίδιο στο privacy.html, και με ξεχασμένα σημάδια', () => {
+  const page = text => ({ path: PRIVACY_PAGE, text });
+  const pending = findContactProblems({ contactEmail: CONTACT_TOKEN, files: [page(`<a href="mailto:${CONTACT_TOKEN}">${CONTACT_TOKEN}</a>`)] });
+  assert.match(pending.join('\n'), /το email επικοινωνίας δεν έχει οριστεί: CONTACT_EMAIL «__CONTACT_EMAIL__» στο src\/config\/app-info\.js/);
+  assert.match(pending.join('\n'), /privacy\.html:1: σημάδι χωρίς τιμή __CONTACT_EMAIL__/);
+  assert.match(findContactProblems({ contactEmail: '', files: [] }).join(), /δεν έχει οριστεί/, 'κενό email');
+
+  const email = 'epikoinonia@example.gr';
+  assert.deepEqual(findContactProblems({ contactEmail: email, files: [page(`<a href="mailto:${email}">${email}</a>`)] }), [], 'όλα στη θέση τους');
+  assert.match(findContactProblems({ contactEmail: email, files: [page('<p>χωρίς email</p>')] }).join(),
+    /το privacy\.html δεν γράφει το email επικοινωνίας epikoinonia@example\.gr/, 'η εφαρμογή και η σελίδα πρέπει να γράφουν το ίδιο email');
+  assert.match(findContactProblems({ contactEmail: email, files: [page(`<p>${email}</p>\n<p>${CONTACT_TOKEN}</p>`)] }).join(),
+    /privacy\.html:2: σημάδι χωρίς τιμή/, 'το email άλλαξε σε ένα σημείο της σελίδας αλλά όχι στο άλλο');
+  assert.match(findContactProblems({ contactEmail: email, files: [] }).join(), /λείπει το privacy\.html/);
+});
+
+test('το email επικοινωνίας του repository: είτε εκκρεμεί ολόκληρο (το deploy αρνείται) είτε είναι συνεπές παντού', () => {
+  const problems = findContactProblems();
+  if (CONTACT_EMAIL.includes('@')) {
+    assert.deepEqual(problems, [], 'μόλις οριστεί, app-info.js και privacy.html πρέπει να συμφωνούν και να μη μένει σημάδι');
+  } else {
+    assert.ok(problems.length > 0, 'όσο λείπει, το deploy αρνείται');
+  }
+});
+
+test('η διεύθυνση παραγωγής έχει μία πηγή, το SITE_URL του src/config/app-info.js', () => {
+  assert.equal(PRODUCTION_URL, new URL(SITE_URL).origin);
+  assert.equal(PRODUCTION_URL, 'https://apomagnitofonisi.texnikes.app', 'χωρίς τελικό /');
+});
+
+test('οι παράμετροι του build: --out ή --check-contact, τίποτε άλλο', () => {
+  assert.deepEqual(parseArgs([]), { checkContact: false });
+  assert.equal(parseArgs(['--out', 'x']).out, path.resolve('x'));
+  assert.deepEqual(parseArgs(['--check-contact']), { checkContact: true });
+  assert.throws(() => parseArgs(['--check-contact', '--out', 'x']), /δεν συνδυάζεται/);
+  assert.throws(() => parseArgs(['--out']), /λείπει η τιμή της --out/);
+  assert.throws(() => parseArgs(['--force']), /άγνωστη παράμετρος: --force/);
 });
 
 test('το build αρνείται host εκτός CSP, βιβλιοθήκη χωρίς έκδοση, inline script ή άνω τελεία, χωρίς να αφήσει μισό dist', t => {
@@ -111,7 +154,7 @@ test('το build αρνείται host εκτός CSP, βιβλιοθήκη χω
 
 test('τα αρχεία της εφαρμογής περνούν τους ελέγχους του build', t => {
   if (skipWhileAppPending(t)) return;
-  assert.deepEqual(inspect(), [], 'CSP ↔ hosts του κώδικα, εκδόσεις βιβλιοθηκών, HTML, άνω τελεία, μυστικά');
+  assert.deepEqual(findBuildProblems(), [], 'CSP ↔ hosts του κώδικα, εκδόσεις βιβλιοθηκών, HTML, άνω τελεία, μυστικά');
 });
 
 test('τα _headers στέλνουν headers ασφαλείας, cross-origin isolation και CSP μόνο για ό,τι χρησιμοποιεί η εφαρμογή', () => {

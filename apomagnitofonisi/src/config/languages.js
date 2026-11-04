@@ -32,3 +32,14 @@ export function findLanguage(code) {
 export function isSupportedLanguageCode(code) {
   return code === AUTO_LANGUAGE_CODE || LANGUAGES.some(l => l.code === code);
 }
+
+/** Ο κωδικός ISO 639-1 όταν ο χρήστης διάλεξε γλώσσα, ή null για «Αυτόματη ανίχνευση» (OO-009). */
+export function explicitLanguageCode(code) {
+  return code && code !== AUTO_LANGUAGE_CODE ? code : null;
+}
+
+/** Το όνομα γλώσσας του Whisper (π.χ. 'greek'), ή null για αυτόματη ανίχνευση ή άγνωστη γλώσσα. */
+export function whisperLanguageFor(code) {
+  const language = findLanguage(explicitLanguageCode(code));
+  return language ? language.whisperName : null;
+}

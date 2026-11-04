@@ -21,6 +21,8 @@
  * @property {string|null} speakerId
  */
 
+import { endsSentence } from './text-normalize.js';
+
 export const DEFAULT_SUBTITLE_RULES = Object.freeze({
   maxCharsPerLine: 42,
   maxLines: 2,
@@ -28,7 +30,6 @@ export const DEFAULT_SUBTITLE_RULES = Object.freeze({
   minDurationSec: 1,
 });
 
-const SENTENCE_END = /[.!?;…][«»"”’)\]]*$/;
 
 /**
  * @param {import('./transcript.js').Segment[]} segments  ταξινομημένα κατά χρόνο
@@ -49,7 +50,7 @@ export function buildSubtitleCues(segments, rules = {}) {
     for (const token of timedTokens(segment)) {
       if (current.length && overflows(current, token, r, capacity)) flush();
       current.push(token);
-      if (SENTENCE_END.test(token.text) && joinedLength(current) >= capacity / 2) flush();
+      if (endsSentence(token.text) && joinedLength(current) >= capacity / 2) flush();
     }
     flush();
   }
@@ -65,17 +66,21 @@ export function buildSubtitleCues(segments, rules = {}) {
     index: i + 1,
     start: cue.start,
     end: cue.end,
-    lines: wrapLines(cue.text, r.maxCharsPerLine, r.maxLines),
+    lines: wrapLines(cue.text, { maxCharsPerLine: r.maxCharsPerLine, maxLines: r.maxLines }),
     speakerId: cue.speakerId,
   }));
 }
 
 /**
- * Σπάει κείμενο σε γραμμές έως `maxPerLine` χαρακτήρων. Για δύο γραμμές
+ * Σπάει κείμενο σε γραμμές έως `maxCharsPerLine` χαρακτήρων. Για δύο γραμμές
  * διαλέγει το κενό που τις κάνει όσο πιο ισομήκεις γίνεται (πιο ευανάγνωστοι
  * υπότιτλοι). Λέξη μεγαλύτερη από τη γραμμή μένει ολόκληρη.
+ *
+ * @param {string} text
+ * @param {Pick<SubtitleRules, 'maxCharsPerLine'|'maxLines'>} rules  ίδια ονόματα με τους κανόνες υποτίτλων
  */
-export function wrapLines(text, maxPerLine, maxLines) {
+export function wrapLines(text, { maxCharsPerLine, maxLines }) {
+  const maxPerLine = maxCharsPerLine;
   const clean = String(text).replace(/\s+/g, ' ').trim();
   if (clean.length <= maxPerLine || maxLines <= 1) return [clean];
   if (maxLines === 2) {

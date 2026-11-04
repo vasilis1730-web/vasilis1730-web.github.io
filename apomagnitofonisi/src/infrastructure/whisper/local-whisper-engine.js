@@ -1,9 +1,10 @@
 /**
  * Μηχανή μεταγραφής στη συσκευή: Whisper (Transformers.js) σε Web Worker,
- * χωρίς να φύγει ο ήχος από τη συσκευή. Υλοποιεί τη θύρα TranscriptionEngine.
+ * χωρίς να φύγει ο ήχος από τη συσκευή. Υλοποιεί τη θύρα TranscriptionEngine,
+ * μαζί με το describeQualityPresets (τα επίπεδα ποιότητας της συσκευής).
  *
- * Ροή: το αρχείο διαβάζεται σε ροή PCM 16 kHz (MediaReader, στο κύριο νήμα,
- * με εφεδρεία Web Audio) → ChunkAssembler (παράθυρα έως 28 s, κομμένα σε
+ * Ροή: το αρχείο διαβάζεται σε ροή PCM (MediaReader, στο κύριο νήμα, με
+ * εφεδρεία Web Audio) → AudioWindowAssembler (παράθυρα έως 28 s, κομμένα σε
  * παύσεις) → worker (Whisper, και αποτύπωμα φωνής όταν ζητείται διαχωρισμός
  * ομιλητών) → τμήματα με χρόνους του αρχείου → ομαδοποίηση ομιλητών (domain).
  * Στον worker βρίσκονται το πολύ `maxWindowsInFlight` παράθυρα, οπότε η μνήμη
@@ -12,45 +13,51 @@
  */
 import { AppError, ERROR_CODES, isCancellation, toAppError } from '../../application/errors.js';
 import { PROGRESS_STAGES, clampFraction } from '../../application/progress.js';
-import { ChunkAssembler } from '../../domain/audio/chunk-assembler.js';
+import { AudioWindowAssembler } from '../../domain/audio/audio-window-assembler.js';
+import { PCM_SAMPLE_RATE } from '../../domain/audio/pcm.js';
 import { clusterEmbeddings, fillMissingLabels } from '../../domain/diarization/speaker-clustering.js';
 import { isLikelyHallucination } from '../../domain/text-normalize.js';
-import { findLanguage, AUTO_LANGUAGE_CODE } from '../../config/languages.js';
+import { ENGINE_KINDS } from '../../domain/transcript.js';
+import { explicitLanguageCode, whisperLanguageFor } from '../../config/languages.js';
 import { SPEAKER_EMBEDDING_MODEL } from '../../config/models.js';
-import { PCM_SAMPLE_RATE } from '../media/mediabunny-media-reader.js';
 import { WorkerClient } from './worker-client.js';
 import { WORKER_REQUESTS, WORKER_EVENTS } from './worker-protocol.js';
-import { selectLocalModel } from './local-model-selection.js';
+import { selectLocalModel, describeQualityPresets } from './local-model-selection.js';
 
 const MAX_WASM_THREADS = 4;
 
 export class LocalWhisperEngine {
-  kind = 'local';
+  kind = ENGINE_KINDS.LOCAL;
 
   #createWorker;
   #mediaReader;
-  #capabilities;
+  #detectCapabilities;
   #maxWindowsInFlight;
 
   /**
    * @param {Object} deps
    * @param {() => Worker} deps.createWorker
    * @param {import('../../application/ports.js').MediaReader} deps.mediaReader
-   * @param {() => Promise<import('../platform/capabilities.js').DeviceCapabilities>} deps.capabilities
+   * @param {() => Promise<import('../platform/capabilities.js').DeviceCapabilities>} deps.detectCapabilities
    * @param {number} [deps.maxWindowsInFlight]
    */
-  constructor({ createWorker, mediaReader, capabilities, maxWindowsInFlight = 2 }) {
+  constructor({ createWorker, mediaReader, detectCapabilities, maxWindowsInFlight = 2 }) {
     this.#createWorker = createWorker;
     this.#mediaReader = mediaReader;
-    this.#capabilities = capabilities;
+    this.#detectCapabilities = detectCapabilities;
     this.#maxWindowsInFlight = maxWindowsInFlight;
   }
 
   async checkAvailability(options = {}) {
-    const caps = await this.#capabilities();
+    const caps = await this.#detectCapabilities();
     if (!caps.webAssembly || !caps.workers) return { available: false, reason: ERROR_CODES.DEVICE_UNSUPPORTED };
-    if (!selectLocalModel(options.qualityPreset, caps)) return { available: false, reason: ERROR_CODES.DEVICE_UNSUPPORTED };
+    if (!selectLocalModel(options.localQualityPreset, caps)) return { available: false, reason: ERROR_CODES.DEVICE_UNSUPPORTED };
     return { available: true };
+  }
+
+  /** @returns {Promise<import('../../application/ports.js').QualityPresetsDescription>} */
+  async describeQualityPresets() {
+    return describeQualityPresets(await this.#detectCapabilities());
   }
 
   /**
@@ -58,8 +65,8 @@ export class LocalWhisperEngine {
    * @returns {Promise<import('../../application/ports.js').RecognitionResult>}
    */
   async recognize({ media, options, signal, onProgress, onPartialSegments }) {
-    const caps = await this.#capabilities();
-    const model = selectLocalModel(options.qualityPreset, caps);
+    const caps = await this.#detectCapabilities();
+    const model = selectLocalModel(options.localQualityPreset, caps);
     if (!model) throw new AppError(ERROR_CODES.DEVICE_UNSUPPORTED, 'το επίπεδο ποιότητας θέλει WebGPU');
     onProgress?.({ stage: PROGRESS_STAGES.READING });
     const info = await this.#mediaReader.probe(media);
@@ -73,8 +80,8 @@ export class LocalWhisperEngine {
       const recognized = await this.#transcribeStream(worker, media, options, info.durationSec, { signal, onProgress, onPartialSegments });
       if (options.diarize) onProgress?.({ stage: PROGRESS_STAGES.DIARIZING });
       return {
-        segments: options.diarize ? withSpeakers(recognized, options.expectedSpeakers) : recognized.map(stripEmbedding),
-        languageCode: options.languageCode === AUTO_LANGUAGE_CODE ? null : options.languageCode,
+        segments: options.diarize ? withSpeakers(recognized, options.expectedSpeakers) : recognized.map(withoutSpeaker),
+        languageCode: explicitLanguageCode(options.languageCode),
         durationSec: info.durationSec,
         model: model.repo,
       };
@@ -89,21 +96,23 @@ export class LocalWhisperEngine {
 
   async #loadModels(worker, model, options, caps, onProgress) {
     onProgress?.({ stage: PROGRESS_STAGES.DOWNLOADING_MODEL, fraction: 0 });
-    await worker.request(WORKER_REQUESTS.LOAD_MODELS, {
+    /** @type {import('./worker-protocol.js').LoadModelsPayload} */
+    const payload = {
       speech: { repo: model.repo, device: model.device, dtype: model.dtype },
       speaker: options.diarize ? { repo: SPEAKER_EMBEDDING_MODEL.repo, dtype: SPEAKER_EMBEDDING_MODEL.dtype } : null,
       wasmThreads: caps.crossOriginIsolated ? Math.max(1, Math.min(MAX_WASM_THREADS, caps.hardwareConcurrency)) : 1,
-    }, {
-      onEvent: event => {
-        if (event.type !== WORKER_EVENTS.MODEL_PROGRESS) return;
-        onProgress?.({ stage: PROGRESS_STAGES.DOWNLOADING_MODEL, fraction: clampFraction(event.loadedBytes / event.totalBytes), detail: { loadedBytes: event.loadedBytes, totalBytes: event.totalBytes } });
+    };
+    await worker.request(WORKER_REQUESTS.LOAD_MODELS, payload, {
+      onEvent: progress => {
+        if (progress.event !== WORKER_EVENTS.MODEL_PROGRESS) return;
+        onProgress?.({ stage: PROGRESS_STAGES.DOWNLOADING_MODEL, fraction: clampFraction(progress.loadedBytes / progress.totalBytes), detail: { loadedBytes: progress.loadedBytes, totalBytes: progress.totalBytes } });
       },
     });
   }
 
   async #transcribeStream(worker, media, options, durationSec, { signal, onProgress, onPartialSegments }) {
-    const language = options.languageCode === AUTO_LANGUAGE_CODE ? null : (findLanguage(options.languageCode) || {}).whisperName || null;
-    const assembler = new ChunkAssembler({ sampleRate: PCM_SAMPLE_RATE });
+    const whisperLanguage = whisperLanguageFor(options.languageCode);
+    const assembler = new AudioWindowAssembler();
     const inFlight = new Set();
     const recognized = [];
     let decodedSec = 0;
@@ -118,13 +127,13 @@ export class LocalWhisperEngine {
       const windowSec = window.samples.length / PCM_SAMPLE_RATE;
       if (window.isSilent) { doneSec += windowSec; reportProgress(); return; }
       while (inFlight.size >= this.#maxWindowsInFlight) await Promise.race(inFlight);
-      const pending = worker.request(WORKER_REQUESTS.TRANSCRIBE_WINDOW, {
-        startSec: window.startSec, samples: window.samples, language, embedSpeakers: options.diarize,
-      }, { transfer: [window.samples.buffer] }).then(result => {
+      /** @type {import('./worker-protocol.js').TranscribeWindowPayload} */
+      const payload = { startSec: window.startSec, samples: window.samples, whisperLanguage, embedSpeakers: options.diarize };
+      const pending = worker.request(WORKER_REQUESTS.TRANSCRIBE_WINDOW, payload, { transfer: [window.samples.buffer] }).then(result => {
         const segments = result.segments.filter(s => !isLikelyHallucination(s.text));
         recognized.push(...segments);
         doneSec += windowSec;
-        if (segments.length) onPartialSegments?.(segments.map(stripEmbedding));
+        if (segments.length) onPartialSegments?.(segments.map(withoutSpeaker));
         reportProgress();
       });
       const tracked = pending.finally(() => inFlight.delete(tracked));
@@ -152,9 +161,9 @@ function withSpeakers(segments, expectedSpeakers) {
   const clustered = clusterEmbeddings(embedded.map(x => x.s.embedding), { speakerCount: expectedSpeakers ?? null });
   embedded.forEach((x, k) => { labels[x.i] = clustered[k]; });
   const filled = fillMissingLabels(labels, segments);
-  return segments.map((s, i) => ({ ...stripEmbedding(s), speakerKey: `local-${filled[i]}` }));
+  return segments.map((s, i) => ({ ...withoutSpeaker(s), speakerKey: `local-${filled[i]}` }));
 }
 
-function stripEmbedding({ start, end, text }) {
+function withoutSpeaker({ start, end, text }) {
   return { start, end, text, speakerKey: null };
 }

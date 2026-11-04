@@ -7,7 +7,8 @@
  * τα γράφει το fingerprints του twa-manifest.json. Το χρησιμοποιεί το build
  * (tools/build-dist.mjs) και το release (tools/android.mjs).
  */
-import { ROOT, ANDROID_DIR, ANDROID_APPS, readTwaManifest } from './project.mjs';
+import { ROOT } from '../paths.mjs';
+import { ANDROID_DIR, ANDROID_APPS, readTwaManifest } from './project.mjs';
 
 /** Οι σχέσεις του assetlinks.json, όπως στις εφαρμογές ΡΟΔΙΟΣ. */
 export const ASSET_LINK_RELATIONS = Object.freeze([

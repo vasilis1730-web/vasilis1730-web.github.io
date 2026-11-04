@@ -12,12 +12,15 @@
  *   apk-inspection.mjs  ανάγνωση της εξόδου του SDK και έλεγχος του APK
  * Εδώ μόνο η εκτέλεση των εργαλείων του Android SDK και του JDK:
  *
- *   node tools/android.mjs version [--code N]
- *        → versionCode=… και versionName=… (για το $GITHUB_OUTPUT)
+ *   node tools/android.mjs version [--version-code N]
+ *        → versionCode=… και versionName=… (για το $GITHUB_OUTPUT), κενό N = από την ώρα UTC
  *   node tools/android.mjs inspect --version-code N
  *        → έλεγχος του ανυπόγραφου APK μετά το Gradle (test.yml)
  *   node tools/android.mjs release --keystore <αρχείο> --out <φάκελος> --version-code N
  *        → υπογραφή APK/AAB με το upload key, επαλήθευση, σύνοψη (android.yml)
+ *
+ * Κάθε εντολή δέχεται μόνο τις δικές της παραμέτρους (COMMAND_FLAGS): μια
+ * παράμετρος άλλης εντολής απορρίπτεται, δεν αγνοείται σιωπηλά.
  *
  * Οι κωδικοί του keystore διαβάζονται ΜΟΝΟ από το περιβάλλον
  * (ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_PASSWORD, ANDROID_KEY_ALIAS) και
@@ -28,7 +31,8 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { ROOT, ANDROID_DIR, ANDROID_APPS, readTwaManifest, gradleOutputsOf } from './android/project.mjs';
+import { ROOT } from './paths.mjs';
+import { ANDROID_DIR, ANDROID_APPS, readTwaManifest, gradleOutputsOf } from './android/project.mjs';
 import { ASSET_LINK_RELATIONS } from './android/asset-links.mjs';
 import { versionFor } from './android/play-version.mjs';
 import { parseBadging, parseResources, parseApksignerCerts, parseKeytoolCerts, checkApk } from './android/apk-inspection.mjs';
@@ -44,7 +48,7 @@ function run(cmd, args, options = {}) {
 }
 
 /** Ο πιο πρόσφατος φάκελος build-tools του SDK που έχει aapt2, apksigner και zipalign. */
-export function buildToolsDir(env = process.env) {
+export function findBuildToolsDir(env = process.env) {
   const sdk = env.ANDROID_HOME || env.ANDROID_SDK_ROOT;
   if (!sdk) throw new Error('λείπει το ANDROID_HOME (Android SDK)');
   const dir = path.join(sdk, 'build-tools');
@@ -65,10 +69,13 @@ function jdkTool(name, env = process.env) {
   return env.JAVA_HOME ? path.join(env.JAVA_HOME, 'bin', name) : name;
 }
 
-/** Διαβάζει ένα APK με το aapt2 και το ελέγχει (tools/android/apk-inspection.mjs). */
-export function inspectApk({ apk, app, root = ROOT, tools = buildToolsDir(), versionCode }) {
+/**
+ * Διαβάζει ένα APK με το aapt2 και το ελέγχει (tools/android/apk-inspection.mjs).
+ * @returns {{ twa: object, badging: object, problems: string[] }} αναφορά: τα στοιχεία του APK και τα προβλήματά του
+ */
+export function inspectApk({ apk, app, root = ROOT, buildToolsDir = findBuildToolsDir(), versionCode }) {
   const twa = readTwaManifest(app, root);
-  const aapt2 = path.join(tools, 'aapt2');
+  const aapt2 = path.join(buildToolsDir, 'aapt2');
   const badging = parseBadging(run(aapt2, ['dump', 'badging', apk]));
   const resources = parseResources(run(aapt2, ['dump', 'resources', apk]));
   const manifestTree = run(aapt2, ['dump', 'xmltree', '--file', 'AndroidManifest.xml', apk]);
@@ -81,31 +88,52 @@ function sha256(file) {
 
 /* ---------- Εντολές ---------- */
 
-/** Οι παράμετροι της γραμμής εντολών. Κωδικοί δεν δέχεται ποτέ από εδώ. */
+/** Οι παράμετροι που δέχεται κάθε εντολή και το όνομα του πεδίου τους στο αποτέλεσμα του parseArgs. */
+export const COMMAND_FLAGS = Object.freeze({
+  version: Object.freeze({ '--version-code': 'versionCode' }),
+  inspect: Object.freeze({ '--version-code': 'versionCode' }),
+  release: Object.freeze({ '--keystore': 'keystore', '--out': 'out', '--version-code': 'versionCode' }),
+});
+
+export const USAGE = 'χρήση: node tools/android.mjs version [--version-code N] | inspect [--version-code N] | release --keystore <αρχείο> --out <φάκελος> --version-code N';
+
+/**
+ * Οι παράμετροι της γραμμής εντολών, ελεγμένες ανά εντολή. Κωδικοί δεν
+ * δέχεται ποτέ από εδώ (μόνο από το περιβάλλον).
+ * @param {string[]} argv
+ * @returns {{ command: 'version'|'inspect'|'release', keystore?: string, out?: string, versionCode?: string }}
+ */
 export function parseArgs(argv) {
   const [command, ...rest] = argv;
+  const flags = Object.hasOwn(COMMAND_FLAGS, command ?? '') ? COMMAND_FLAGS[command] : null;
+  if (!flags) throw new Error(`άγνωστη εντολή «${command ?? ''}». ${USAGE}`);
   const args = { command };
-  for (let i = 0; i < rest.length; i++) {
-    const match = rest[i].match(/^--(keystore|out|version-code|code)$/);
-    if (!match) throw new Error(`άγνωστη παράμετρος: ${rest[i]}`);
-    args[match[1]] = rest[++i] ?? '';
+  for (let i = 0; i < rest.length; i += 2) {
+    const flag = rest[i];
+    if (!Object.hasOwn(flags, flag)) {
+      throw new Error(`η παράμετρος ${flag} δεν ισχύει για την εντολή ${command} (δέχεται: ${Object.keys(flags).join(', ')})`);
+    }
+    if (i + 1 >= rest.length) throw new Error(`λείπει η τιμή της ${flag}`);
+    const key = flags[flag];
+    if (Object.hasOwn(args, key)) throw new Error(`η ${flag} δόθηκε δύο φορές`);
+    args[key] = rest[i + 1];
   }
   return args;
 }
 
 function commandVersion(args) {
-  const { versionCode, versionName } = versionFor(new Date(), args.code);
+  const { versionCode, versionName } = versionFor(new Date(), args.versionCode);
   console.log(`versionCode=${versionCode}`);
   console.log(`versionName=${versionName}`);
 }
 
 function commandInspect(args, root = ROOT) {
-  const tools = buildToolsDir();
+  const buildToolsDir = findBuildToolsDir();
   const problems = [];
   for (const app of ANDROID_APPS) {
     const { apk } = gradleOutputsOf(app, root);
     if (!fs.existsSync(apk)) { problems.push(`${app}: λείπει το ${path.relative(root, apk)} (τρέξε πρώτα ./gradlew assembleRelease)`); continue; }
-    const result = inspectApk({ apk, app, root, tools, versionCode: args['version-code'] || undefined });
+    const result = inspectApk({ apk, app, root, buildToolsDir, versionCode: args.versionCode || undefined });
     problems.push(...result.problems);
     const b = result.badging;
     console.log(`${result.problems.length ? '✖' : '✓'} ${app}: ${b.package} ${b.versionCode} (${b.versionName}), minSdk ${b.minSdk}, targetSdk ${b.targetSdk}`);
@@ -141,7 +169,7 @@ async function liveStatus(twa, fingerprint) {
 }
 
 /** Υπογράφει APK (για δοκιμή) και AAB (για το Play) μίας εφαρμογής και τα επαληθεύει. */
-async function signApp({ app, root, tools, keystore, alias, env, out, work, versionCode }) {
+async function signApp({ app, root, buildToolsDir, keystore, alias, env, out, work, versionCode }) {
   const twa = readTwaManifest(app, root);
   const built = gradleOutputsOf(app, root);
   for (const file of Object.values(built)) {
@@ -153,11 +181,11 @@ async function signApp({ app, root, tools, keystore, alias, env, out, work, vers
 
   // APK για απευθείας δοκιμή: zipalign και υπογραφή v1/v2/v3 (χωρίς .idsig).
   const aligned = path.join(work, `${app}-aligned.apk`);
-  run(path.join(tools, 'zipalign'), ['-f', '-p', '4', built.apk, aligned]);
-  run(path.join(tools, 'apksigner'), ['sign', '--ks', keystore, '--ks-key-alias', alias,
+  run(path.join(buildToolsDir, 'zipalign'), ['-f', '-p', '4', built.apk, aligned]);
+  run(path.join(buildToolsDir, 'apksigner'), ['sign', '--ks', keystore, '--ks-key-alias', alias,
     '--ks-pass', 'env:ANDROID_KEYSTORE_PASSWORD', '--key-pass', 'env:ANDROID_KEY_PASSWORD',
     '--v4-signing-enabled', 'false', '--out', apk, aligned], { env });
-  const apkCerts = parseApksignerCerts(run(path.join(tools, 'apksigner'), ['verify', '--print-certs', apk]));
+  const apkCerts = parseApksignerCerts(run(path.join(buildToolsDir, 'apksigner'), ['verify', '--print-certs', apk]));
 
   // AAB για το Play Console: υπογραφή JAR με το upload key.
   run(jdkTool('jarsigner', env), ['-keystore', keystore, '-storepass:env', 'ANDROID_KEYSTORE_PASSWORD',
@@ -171,7 +199,7 @@ async function signApp({ app, root, tools, keystore, alias, env, out, work, vers
   }
   // Χωρίς ένα μοναδικό πιστοποιητικό δεν υπάρχει τι να συγκριθεί (το πρόβλημα καταγράφηκε ήδη).
   const fingerprint = apkCerts.length === 1 ? apkCerts[0] : undefined;
-  const inspected = inspectApk({ apk, app, root, tools, versionCode });
+  const inspected = inspectApk({ apk, app, root, buildToolsDir, versionCode });
   problems.push(...inspected.problems);
 
   const inRepo = !!fingerprint && (twa.fingerprints || []).some(f => f.value === fingerprint);
@@ -184,7 +212,7 @@ async function signApp({ app, root, tools, keystore, alias, env, out, work, vers
 }
 
 /** Η σύνοψη Markdown του release (για το log και το $GITHUB_STEP_SUMMARY). */
-export function releaseSummary({ rows, versionCode, tools, warnings, problems }) {
+export function releaseSummary({ rows, versionCode, buildToolsDir, warnings, problems }) {
   const versionName = rows[0] ? rows[0].badging.versionName : '';
   const host = rows[0] ? rows[0].twa.host : '';
   return [
@@ -197,7 +225,7 @@ export function releaseSummary({ rows, versionCode, tools, warnings, problems })
     'Το `.aab` ανεβαίνει στο Play Console, το `.apk` εγκαθίσταται απευθείας σε κινητό για δοκιμή.',
     `«Στο domain»: αν το https://${host}/.well-known/assetlinks.json έχει ήδη αυτό το αποτύπωμα. «Google»: τι απαντά το Digital Asset Links API.`,
     'Οι εγκαταστάσεις από το Play υπογράφονται με τα κλειδιά «Υπογραφή εφαρμογής» του Play, που χρειάζονται δικά τους αποτυπώματα στο twa-manifest.json (docs/ANDROID.md §4).',
-    `Android build-tools: ${tools ? path.basename(tools) : '-'}.`,
+    `Android build-tools: ${buildToolsDir ? path.basename(buildToolsDir) : '-'}.`,
     ...(warnings.length ? ['', ...warnings.map(w => `> ⚠️ ${w}`)] : []),
     ...(problems.length ? ['', ...problems.map(p => `> ✖ ${p}`)] : []),
     '',
@@ -207,7 +235,7 @@ export function releaseSummary({ rows, versionCode, tools, warnings, problems })
 async function commandRelease(args, root = ROOT) {
   const keystore = args.keystore;
   const out = path.resolve(args.out || 'android-release');
-  const versionCode = args['version-code'];
+  const versionCode = args.versionCode;
   if (!keystore || !fs.existsSync(keystore) || !fs.statSync(keystore).size) throw new Error('λείπει ή είναι άδειο το keystore (--keystore)');
   if (!versionCode) throw new Error('λείπει το --version-code');
   const alias = process.env.ANDROID_KEY_ALIAS;
@@ -215,7 +243,7 @@ async function commandRelease(args, root = ROOT) {
   // Κενός κωδικός κλειδιού = ίδιος με του keystore (όπως στα keystores PKCS12).
   const env = { ...process.env, ANDROID_KEY_PASSWORD: process.env.ANDROID_KEY_PASSWORD || process.env.ANDROID_KEYSTORE_PASSWORD };
 
-  const tools = buildToolsDir();
+  const buildToolsDir = findBuildToolsDir();
   fs.rmSync(out, { recursive: true, force: true });
   fs.mkdirSync(out, { recursive: true });
   const work = fs.mkdtempSync(path.join(out, '.work-'));
@@ -224,7 +252,7 @@ async function commandRelease(args, root = ROOT) {
   const problems = [];
   try {
     for (const app of ANDROID_APPS) {
-      const result = await signApp({ app, root, tools, keystore, alias, env, out, work, versionCode });
+      const result = await signApp({ app, root, buildToolsDir, keystore, alias, env, out, work, versionCode });
       rows.push(result.row);
       warnings.push(...result.warnings);
       problems.push(...result.problems);
@@ -236,7 +264,7 @@ async function commandRelease(args, root = ROOT) {
   const files = fs.readdirSync(out).filter(f => /\.(apk|aab)$/.test(f)).sort();
   fs.writeFileSync(path.join(out, 'SHA256SUMS'), files.map(f => `${sha256(path.join(out, f))}  ${f}\n`).join(''));
 
-  const summary = releaseSummary({ rows, versionCode, tools, warnings, problems });
+  const summary = releaseSummary({ rows, versionCode, buildToolsDir, warnings, problems });
   console.log(summary);
   if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary);
   if (process.env.GITHUB_ACTIONS) for (const w of warnings) console.log(`::warning::${w}`);
@@ -248,8 +276,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     const args = parseArgs(process.argv.slice(2));
     if (args.command === 'version') commandVersion(args);
     else if (args.command === 'inspect') commandInspect(args);
-    else if (args.command === 'release') await commandRelease(args);
-    else throw new Error('χρήση: node tools/android.mjs version|inspect|release …');
+    else await commandRelease(args);
   } catch (error) {
     console.error(`✖ ${error.message}`);
     process.exitCode = 1;

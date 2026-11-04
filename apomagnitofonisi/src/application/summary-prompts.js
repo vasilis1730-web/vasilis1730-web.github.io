@@ -8,6 +8,7 @@
  */
 import { SUMMARY_KINDS, transcriptDuration, findSpeaker } from '../domain/transcript.js';
 import { formatClock } from '../domain/time-format.js';
+import { INPUT_ISSUES, invalidInput } from './errors.js';
 
 export const SUMMARY_SYSTEM_PROMPT = [
   'Είσαι προσεκτικός γραμματέας συσκέψεων. Σου δίνεται η απομαγνητοφώνηση (αυτόματη μεταγραφή) μιας ηχογράφησης, με χρόνους και ονόματα ομιλητών.',
@@ -46,11 +47,15 @@ const INSTRUCTIONS = Object.freeze({
   ].join('\n'),
 });
 
-/** Το κείμενο της οδηγίας για κάθε είδος. Το 'custom' παίρνει την οδηγία του χρήστη. */
+/**
+ * Το κείμενο της οδηγίας για κάθε είδος. Το 'custom' παίρνει την οδηγία του
+ * χρήστη: κενή οδηγία → INVALID_INPUT (τη διορθώνει ο χρήστης), άγνωστο είδος →
+ * RangeError (λάθος του κώδικα).
+ */
 export function buildSummaryInstruction(kind, customInstruction = '') {
   if (kind === SUMMARY_KINDS.CUSTOM) {
     const clean = String(customInstruction).trim();
-    if (!clean) throw new RangeError('η δική σου οδηγία είναι κενή');
+    if (!clean) throw invalidInput(INPUT_ISSUES.EMPTY_INSTRUCTION, 'κενή οδηγία');
     return `Ακολούθησε την παρακάτω οδηγία του χρήστη για τη μεταγραφή:\n\n${clean}`;
   }
   const text = INSTRUCTIONS[kind];
@@ -66,11 +71,9 @@ export function buildSummaryInstruction(kind, customInstruction = '') {
  * @param {{ unknownSpeaker: string }} labels
  */
 export function formatTranscriptForPrompt(transcript, { unknownSpeaker }) {
-  const lines = [
-    '<μεταγραφή>',
-    `Τίτλος: ${transcript.title}`,
-    `Διάρκεια: ${formatClock(transcriptDuration(transcript))}`,
-  ];
+  const lines = ['<μεταγραφή>'];
+  if (transcript.title) lines.push(`Τίτλος: ${transcript.title}`);
+  lines.push(`Διάρκεια: ${formatClock(transcriptDuration(transcript))}`);
   if (transcript.speakers.length) lines.push(`Ομιλητές: ${transcript.speakers.map(s => s.label).join(', ')}`);
   lines.push('');
   for (const segment of transcript.segments) {

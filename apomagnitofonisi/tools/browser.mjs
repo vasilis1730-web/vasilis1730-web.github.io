@@ -53,6 +53,6 @@ export function launchOptions(env = process.env) {
  * δεν εμπιστεύεται, οπότε καμία εξωτερική βιβλιοθήκη δεν φορτώνει. Ρητή
  * επιλογή, μόνο τοπικά. Στον runner του CI δεν χρειάζεται ποτέ.
  */
-export function ignoreHttpsErrors(env = process.env) {
+export function shouldIgnoreHttpsErrors(env = process.env) {
   return env.APOMAGN_BROWSER_IGNORE_TLS === '1';
 }

@@ -1,5 +1,6 @@
 /**
- * Μαζεύει PCM 16 kHz σε παράθυρα για το Whisper (που δέχεται έως 30 s).
+ * Μαζεύει PCM (PCM_SAMPLE_RATE) σε παράθυρα ήχου για το Whisper (που δέχεται
+ * έως 30 s).
  *
  * Κάθε παράθυρο έχει έως `maxWindowSec` και κόβεται στο πιο ήσυχο πλαίσιο
  * `frameSec` ανάμεσα σε `minWindowSec` και `maxWindowSec`, ώστε το κόψιμο να
@@ -13,10 +14,10 @@
  * @property {Float32Array} samples
  * @property {boolean} isSilent
  */
-import { rms } from './pcm.js';
+import { rms, PCM_SAMPLE_RATE } from './pcm.js';
 
 export const DEFAULT_WINDOW_RULES = Object.freeze({
-  sampleRate: 16000,
+  sampleRate: PCM_SAMPLE_RATE,
   maxWindowSec: 28,
   minWindowSec: 18,
   frameSec: 0.1,
@@ -26,7 +27,7 @@ export const DEFAULT_WINDOW_RULES = Object.freeze({
   minTailSec: 0.3,
 });
 
-export class ChunkAssembler {
+export class AudioWindowAssembler {
   #rules;
   #buffer;
   #length = 0;

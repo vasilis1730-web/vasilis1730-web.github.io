@@ -4,11 +4,12 @@
  * Ίδια φωνή → κοντινά διανύσματα, και η ομαδοποίηση γίνεται στο domain.
  */
 
+import { PCM_SAMPLE_RATE } from '../../domain/audio/pcm.js';
+
 /** Τμήματα μικρότερα από αυτό δεν δίνουν αξιόπιστο αποτύπωμα (s). */
 export const MIN_EMBEDDING_SEC = 1;
 /** Από μεγάλα τμήματα παίρνουμε τα μεσαία τόσα δευτερόλεπτα (ταχύτητα, ίδια ακρίβεια). */
 const MAX_EMBEDDING_SEC = 10;
-const SAMPLE_RATE = 16000;
 
 export class SpeakerEmbedder {
   #processor;
@@ -31,12 +32,12 @@ export class SpeakerEmbedder {
   }
 
   /**
-   * @param {Float32Array} samples  PCM 16 kHz ενός τμήματος
+   * @param {Float32Array} samples  PCM με PCM_SAMPLE_RATE ενός τμήματος
    * @returns {Promise<Float32Array|null>} null για πολύ μικρό τμήμα
    */
   async embed(samples) {
-    if (samples.length < MIN_EMBEDDING_SEC * SAMPLE_RATE) return null;
-    const maxLength = MAX_EMBEDDING_SEC * SAMPLE_RATE;
+    if (samples.length < MIN_EMBEDDING_SEC * PCM_SAMPLE_RATE) return null;
+    const maxLength = MAX_EMBEDDING_SEC * PCM_SAMPLE_RATE;
     const middle = samples.length > maxLength
       ? samples.subarray(Math.floor((samples.length - maxLength) / 2), Math.floor((samples.length + maxLength) / 2))
       : samples;

@@ -1,25 +1,27 @@
 /**
- * Μετάφραση των απαντήσεων του ElevenLabs Scribe: λέξεις → RecognizedToken
- * του domain, και σφάλματα HTTP → AppError με σταθερούς κωδικούς.
+ * Το κοινό λεξιλόγιο του ElevenLabs για τη μηχανή και τον έλεγχο κλειδιού:
+ * λέξεις του Scribe → RecognizedToken του domain, και σφάλματα HTTP του
+ * ElevenLabs → AppError με σταθερούς κωδικούς.
  *
  * Απάντηση (μονοκάναλη): { language_code, text, words: [{ text, type: 'word'
  * | 'spacing' | 'audio_event', start, end, speaker_id }], audio_duration_secs }.
+ *
+ * @typedef {Object} AudioEventLabels  ονόματα για τα ηχητικά συμβάντα, από τη διεπαφή (CA-009)
+ * @property {Record<string, string>} byEvent  π.χ. { laughter: 'γέλια' }
+ * @property {string} unknown  για συμβάν χωρίς όνομα
  */
 import { AppError, ERROR_CODES } from '../../application/errors.js';
 import { findLanguage } from '../../config/languages.js';
 
-/** Ελληνικά ονόματα για τα συνηθισμένα ηχητικά συμβάντα. */
-const AUDIO_EVENT_NAMES = Object.freeze({
-  laughter: 'γέλια', laughs: 'γέλια', laughing: 'γέλια',
-  applause: 'χειροκροτήματα', clapping: 'χειροκροτήματα',
-  music: 'μουσική', cough: 'βήχας', coughing: 'βήχας', noise: 'θόρυβος', silence: 'σιωπή',
-});
+/** Χωρίς ετικέτες από τη διεπαφή, το συμβάν μένει με το όνομα του ElevenLabs. */
+const RAW_EVENT_LABELS = Object.freeze({ byEvent: Object.freeze({}), unknown: '?' });
 
 /**
  * @param {any} body  το JSON της απάντησης
+ * @param {{ audioEventLabels?: AudioEventLabels }} [options]
  * @returns {{ tokens: import('../../domain/words-to-segments.js').RecognizedToken[], languageCode: string|null, durationSec: number|null }}
  */
-export function readScribeResponse(body) {
+export function readScribeResponse(body, { audioEventLabels = RAW_EVENT_LABELS } = {}) {
   const words = Array.isArray(body && body.words)
     ? body.words
     : (Array.isArray(body && body.transcripts) ? body.transcripts.flatMap(t => t.words || []) : []);
@@ -30,7 +32,7 @@ export function readScribeResponse(body) {
     const end = Number(word.end);
     if (!Number.isFinite(start)) continue;
     const isEvent = word.type === 'audio_event';
-    const text = isEvent ? `[${audioEventName(word.text)}]` : String(word.text ?? '').trim();
+    const text = isEvent ? `[${audioEventName(word.text, audioEventLabels)}]` : String(word.text ?? '').trim();
     if (!text) continue;
     tokens.push({ text, start, end: Number.isFinite(end) ? end : start, speakerKey: word.speaker_id ?? null, kind: isEvent ? 'event' : 'word' });
   }
@@ -40,11 +42,12 @@ export function readScribeResponse(body) {
 }
 
 /**
+ * Σφάλμα HTTP του ElevenLabs (οποιουδήποτε endpoint) ως AppError.
  * @param {number} status
  * @param {string} bodyText
  * @returns {AppError}
  */
-export function scribeErrorFor(status, bodyText) {
+export function elevenLabsErrorFor(status, bodyText) {
   const detail = parseDetail(bodyText);
   const details = { status, providerStatus: detail.status, providerMessage: detail.message };
   const error = code => new AppError(code, `ElevenLabs ${status}: ${detail.message || detail.status || ''}`.trim(), { details });
@@ -53,7 +56,7 @@ export function scribeErrorFor(status, bodyText) {
   if (status === 403) return error(ERROR_CODES.KEY_INVALID);
   if (status === 413) return error(ERROR_CODES.FILE_TOO_LARGE);
   if (status === 429) return error(ERROR_CODES.RATE_LIMITED);
-  if (status === 400 || status === 422) return error(ERROR_CODES.INVALID_INPUT);
+  if (status === 400 || status === 422) return error(ERROR_CODES.PROVIDER_REJECTED);
   if (status === 503 || status === 529) return error(ERROR_CODES.OVERLOADED);
   return error(ERROR_CODES.UNKNOWN);
 }
@@ -71,7 +74,7 @@ function parseDetail(bodyText) {
   return { status: null, message: null };
 }
 
-function audioEventName(raw) {
+function audioEventName(raw, labels) {
   const clean = String(raw ?? '').replace(/[()[\]]/g, '').trim();
-  return AUDIO_EVENT_NAMES[clean.toLowerCase()] || clean || 'ήχος';
+  return labels.byEvent[clean.toLowerCase()] || clean || labels.unknown;
 }

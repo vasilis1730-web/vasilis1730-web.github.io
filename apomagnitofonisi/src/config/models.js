@@ -8,12 +8,28 @@
  * Ο encoder του Whisper είναι ευαίσθητος στην κβάντιση, γι' αυτό στο WebGPU
  * μένει fp32/fp16 όπου το μέγεθος το επιτρέπει.
  */
+/**
+ * Τα επίπεδα ποιότητας στη συσκευή: το καθένα είναι ένα μοντέλο Whisper.
+ *
+ * @typedef {typeof LOCAL_QUALITY_PRESET_IDS[keyof typeof LOCAL_QUALITY_PRESET_IDS]} LocalQualityPresetId
+ * @typedef {LocalQualityPresetId|typeof AUTO_LOCAL_QUALITY} LocalQualityChoice  ό,τι διαλέγει ο χρήστης
+ */
 export const LOCAL_QUALITY_PRESET_IDS = Object.freeze({
-  AUTO: 'auto',
   FAST: 'fast',
   BALANCED: 'balanced',
   ACCURATE: 'accurate',
 });
+
+/**
+ * «Αυτόματα»: ΔΕΝ είναι επίπεδο, είναι στρατηγική επιλογής. Η μηχανή διαλέγει
+ * επίπεδο από τις δυνατότητες της συσκευής (API-011).
+ */
+export const AUTO_LOCAL_QUALITY = 'auto';
+
+/** Αληθές για ό,τι μπορεί να διαλέξει ο χρήστης: ένα επίπεδο ή το «Αυτόματα». */
+export function isLocalQualityChoice(value) {
+  return value === AUTO_LOCAL_QUALITY || Object.values(LOCAL_QUALITY_PRESET_IDS).includes(value);
+}
 
 export const LOCAL_MODEL_PRESETS = Object.freeze([
   {
@@ -41,6 +57,14 @@ export const LOCAL_MODEL_PRESETS = Object.freeze([
     },
   },
 ].map(Object.freeze));
+
+/** Η μικρότερη λήψη μοντέλου μεταγραφής στη συσκευή (MB), για τα κείμενα της διεπαφής. */
+export function smallestLocalDownloadMb() {
+  return Math.min(...LOCAL_MODEL_PRESETS.flatMap(p => Object.values(p.variants).map(v => v.approxDownloadMb)));
+}
+
+/** Η μεταγραφή του ElevenLabs Scribe v2 (τιμή ανά ώρα ήχου, USD, Νοέμβριος 2026). */
+export const ELEVENLABS_SCRIBE_USD_PER_HOUR = 0.22;
 
 /** Αποτύπωμα φωνής (speaker embedding) για τον διαχωρισμό ομιλητών στη συσκευή. */
 export const SPEAKER_EMBEDDING_MODEL = Object.freeze({

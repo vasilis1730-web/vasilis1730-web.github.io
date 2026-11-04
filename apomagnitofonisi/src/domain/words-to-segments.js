@@ -23,6 +23,7 @@
  * @property {string|null} speakerKey
  * @property {import('./transcript.js').Word[]} [words]
  */
+import { endsSentence } from './text-normalize.js';
 
 export const DEFAULT_GROUPING_RULES = Object.freeze({
   maxPauseSec: 1.2,
@@ -30,7 +31,6 @@ export const DEFAULT_GROUPING_RULES = Object.freeze({
   preferBreakAfterSec: 15,
 });
 
-const SENTENCE_END = /[.!?;…][«»"”’)\]]*$/;
 
 /**
  * @param {RecognizedToken[]} tokens
@@ -69,7 +69,7 @@ function startsNewSegment(current, token, rules) {
   const pause = token.start - current.end;
   const tooLong = token.end - current.start > rules.maxSegmentSec;
   const lastWord = current.words[current.words.length - 1];
-  const naturalBreak = current.end - current.start >= rules.preferBreakAfterSec && SENTENCE_END.test(lastWord.text);
+  const naturalBreak = current.end - current.start >= rules.preferBreakAfterSec && endsSentence(lastWord.text);
   return speakerChanged || pause > rules.maxPauseSec || tooLong || naturalBreak;
 }
 

@@ -39,29 +39,33 @@ export class ClaudeSummarizer {
    * @param {import('../../application/ports.js').SummaryRequest} request
    * @returns {Promise<import('../../application/ports.js').SummaryResult>}
    */
-  async summarize({ systemPrompt, transcriptText, instruction, model, signal, onText, onRestart }) {
+  async summarize({ systemPrompt, transcriptText, instruction, modelId, signal, onText, onRestart }) {
     const apiKey = this.#getApiKey();
     if (!apiKey) throw new AppError(ERROR_CODES.KEY_MISSING, 'λείπει το κλειδί Anthropic');
     const { client, sdk } = await createAnthropicClient(this.#loadSdk, apiKey);
+    let restarted = false;
     try {
-      const stream = client.beta.messages.stream(buildRequest({ systemPrompt, transcriptText, instruction, model }), { signal });
+      const stream = client.beta.messages.stream(buildRequest({ systemPrompt, transcriptText, instruction, modelId }), { signal });
       stream.on('streamEvent', event => {
-        if (event.type === 'content_block_start' && event.content_block && event.content_block.type === 'fallback') onRestart?.();
+        if (event.type === 'content_block_start' && event.content_block && event.content_block.type === 'fallback') {
+          restarted = true;
+          onRestart?.();
+        }
       });
       stream.on('text', delta => onText?.(delta));
       const message = await stream.finalMessage();
       if (message.stop_reason === 'refusal') throw new AppError(ERROR_CODES.REFUSED, 'το μοντέλο αρνήθηκε', { details: { category: message.stop_details && message.stop_details.category } });
-      return { text: finalText(message.content), model: message.model || model, truncated: message.stop_reason === 'max_tokens' };
+      return { text: finalText(message.content), modelId: message.model || modelId, truncated: message.stop_reason === 'max_tokens', restarted };
     } catch (error) {
-      throw anthropicErrorToAppError(sdk, error);
+      throw anthropicErrorToAppError(error, sdk);
     }
   }
 }
 
 /** Το σώμα του αιτήματος (εξάγεται για έλεγχο από τα tests). */
-export function buildRequest({ systemPrompt, transcriptText, instruction, model }) {
+export function buildRequest({ systemPrompt, transcriptText, instruction, modelId }) {
   const request = {
-    model,
+    model: modelId,
     max_tokens: MAX_OUTPUT_TOKENS,
     output_config: { effort: EFFORT },
     system: [{ type: 'text', text: systemPrompt }],
@@ -73,7 +77,7 @@ export function buildRequest({ systemPrompt, transcriptText, instruction, model 
       ],
     }],
   };
-  const info = findClaudeModel(model);
+  const info = findClaudeModel(modelId);
   if (info && info.supportsServerFallback) {
     request.betas = [SERVER_FALLBACK_BETA];
     request.fallbacks = 'default';

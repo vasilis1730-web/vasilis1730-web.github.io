@@ -1,7 +1,10 @@
 /**
  * Περίπτωση χρήσης «Περίληψη και πρακτικά»: φτιάχνει το prompt από τη
- * μεταγραφή, ζητά από τον Summarizer (π.χ. Claude) να γράψει, δίνει το κείμενο
- * όσο γράφεται και αποθηκεύει την περίληψη μαζί με τη μεταγραφή.
+ * μεταγραφή, ζητά από τον Summarizer να γράψει, δίνει το κείμενο όσο
+ * γράφεται και αποθηκεύει την περίληψη μαζί με τη μεταγραφή.
+ *
+ * Οι περιλήψεις γίνονται μόνο με Claude (απόφαση του έργου), γι' αυτό η
+ * υπηρεσία ελέγχει και τιμολογεί τα μοντέλα από τον κατάλογο CLAUDE_MODELS.
  */
 import { addSummary, SUMMARY_KINDS } from '../domain/transcript.js';
 import { findClaudeModel } from '../config/models.js';
@@ -10,13 +13,20 @@ import { SUMMARY_SYSTEM_PROMPT, buildSummaryInstruction, formatTranscriptForProm
 import { estimateTokens, estimateSummaryCost } from './cost-estimate.js';
 
 /**
- * @typedef {Object} SummaryJob
+ * Οι επιλογές μιας περίληψης (API-003).
+ *
+ * @typedef {Object} SummaryOptions
  * @property {import('../domain/transcript.js').SummaryKind} kind
  * @property {string} [customInstruction]  μόνο για kind 'custom'
  * @property {string} modelId
  * @property {AbortSignal} [signal]
  * @property {(delta: string) => void} [onText]
  * @property {() => void} [onRestart]
+ *
+ * @typedef {Object} SummaryOutcome
+ * @property {import('../domain/transcript.js').Transcript} transcript  με την περίληψη αποθηκευμένη
+ * @property {import('../domain/transcript.js').Summary} summary
+ * @property {boolean} restarted  ξαναγράφτηκε από εφεδρικό μοντέλο
  */
 export class SummaryService {
   #summarizer;
@@ -43,6 +53,8 @@ export class SummaryService {
 
   /**
    * Χονδρική εκτίμηση κόστους πριν από την αποστολή.
+   * @param {import('../domain/transcript.js').Transcript} transcript
+   * @param {Pick<SummaryOptions, 'kind'|'customInstruction'|'modelId'>} options
    * @returns {{ inputTokens: number, outputTokens: number, usd: number }}
    */
   estimateCost(transcript, { kind, customInstruction = '', modelId }) {
@@ -54,18 +66,13 @@ export class SummaryService {
 
   /**
    * @param {import('../domain/transcript.js').Transcript} transcript
-   * @param {SummaryJob} job
-   * @returns {Promise<{ transcript: import('../domain/transcript.js').Transcript, summary: import('../domain/transcript.js').Summary }>}
+   * @param {SummaryOptions} options
+   * @returns {Promise<SummaryOutcome>}
    */
   async summarize(transcript, { kind, customInstruction = '', modelId, signal, onText, onRestart }) {
     requireModel(modelId);
-    if (!transcript.segments.length) throw new AppError(ERROR_CODES.INVALID_INPUT, 'η μεταγραφή δεν έχει κείμενο');
-    let instruction;
-    try {
-      instruction = buildSummaryInstruction(kind, customInstruction);
-    } catch (error) {
-      throw new AppError(ERROR_CODES.INVALID_INPUT, error.message, { cause: error });
-    }
+    if (!transcript.segments.length) throw new AppError(ERROR_CODES.EMPTY_TRANSCRIPT, 'η μεταγραφή δεν έχει κείμενο');
+    const instruction = buildSummaryInstruction(kind, customInstruction);
 
     let result;
     try {
@@ -73,7 +80,7 @@ export class SummaryService {
         systemPrompt: SUMMARY_SYSTEM_PROMPT,
         transcriptText: this.#transcriptText(transcript),
         instruction,
-        model: modelId,
+        modelId,
         signal,
         onText,
         onRestart,
@@ -88,14 +95,14 @@ export class SummaryService {
       id: this.#ids.newId(),
       kind,
       ...(kind === SUMMARY_KINDS.CUSTOM ? { instruction: String(customInstruction).trim() } : {}),
-      model: result.model || modelId,
+      model: result.modelId || modelId,
       createdAt: now,
       text: result.text,
       ...(result.truncated ? { truncated: true } : {}),
     };
     const updated = addSummary(transcript, summary, now);
     await this.#repository.save(updated);
-    return { transcript: updated, summary };
+    return { transcript: updated, summary, restarted: Boolean(result.restarted) };
   }
 
   #transcriptText(transcript) {
@@ -103,8 +110,9 @@ export class SummaryService {
   }
 }
 
+/** Άγνωστο μοντέλο είναι λάθος προγραμματισμού (API-001): η διεπαφή δείχνει μόνο τον κατάλογο. */
 function requireModel(modelId) {
   const model = findClaudeModel(modelId);
-  if (!model) throw new AppError(ERROR_CODES.INVALID_INPUT, `άγνωστο μοντέλο ${modelId}`);
+  if (!model) throw new RangeError(`άγνωστο μοντέλο ${modelId}`);
   return model;
 }

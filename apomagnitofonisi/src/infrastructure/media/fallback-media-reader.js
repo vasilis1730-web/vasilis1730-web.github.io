@@ -1,7 +1,9 @@
 /**
  * Ανάγνωση με εφεδρεία: δοκιμάζει πρώτα τον κύριο αναγνώστη (Mediabunny) και,
  * μόνο αν αυτός πει ότι η μορφή δεν υποστηρίζεται, τον εφεδρικό (Web Audio).
- * Υλοποιεί τη θύρα MediaReader (σύνθεση, Composite).
+ * Υλοποιεί τη θύρα MediaReader ως αλυσίδα εφεδρείας (Chain of Responsibility,
+ * OO-012). Η συμπίεση για αποστολή γίνεται μόνο από τον κύριο, που έχει
+ * κωδικοποιητή: αν αποτύχει, το τι στέλνεται το αποφασίζει η μηχανή (API-005).
  */
 import { AppError, ERROR_CODES } from '../../application/errors.js';
 
@@ -43,12 +45,7 @@ export class FallbackMediaReader {
     }
   }
 
-  async extractCompactAudio(media, options) {
-    try {
-      return await this.#primary.extractCompactAudio(media, options);
-    } catch (error) {
-      if (!isUnsupported(error)) throw error;
-      return media;
-    }
+  extractCompactAudio(media, options) {
+    return this.#primary.extractCompactAudio(media, options);
   }
 }

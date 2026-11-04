@@ -3,12 +3,15 @@
  * καθαρίζει το κείμενο, φτιάχνει τη μεταγραφή (domain) και την αποθηκεύει.
  *
  * Η υπηρεσία δεν ξέρει τίποτα για Whisper, ElevenLabs ή αρχεία: μιλά μόνο με
- * τις θύρες TranscriptionEngine, TranscriptRepository, Clock και IdGenerator.
+ * τις θύρες TranscriptionEngine, TranscriptRepository, DeviceStorage, Clock και
+ * IdGenerator. Είναι και η μία πηγή για το αν μια μηχανή είναι διαθέσιμη και
+ * ποια επίπεδα ποιότητας έχει (OO-003), ώστε η διεπαφή να μην ξαναγράφει τους
+ * κανόνες των μηχανών.
  */
 import { createTranscript, speakersFromKeys } from '../domain/transcript.js';
 import { normalizeRecognizedText } from '../domain/text-normalize.js';
-import { isSupportedLanguageCode, AUTO_LANGUAGE_CODE } from '../config/languages.js';
-import { AppError, ERROR_CODES, throwIfAborted, toAppError } from './errors.js';
+import { isSupportedLanguageCode, explicitLanguageCode } from '../config/languages.js';
+import { AppError, ERROR_CODES, INPUT_ISSUES, invalidInput, throwIfAborted, toAppError } from './errors.js';
 import { PROGRESS_STAGES } from './progress.js';
 import { MAX_EXPECTED_SPEAKERS } from './limits.js';
 
@@ -18,10 +21,11 @@ import { MAX_EXPECTED_SPEAKERS } from './limits.js';
  * @typedef {import('./ports.js').RecognizedSegment} RecognizedSegment
  * @typedef {import('./ports.js').ProgressUpdate} ProgressUpdate
  * @typedef {import('./ports.js').Transcript} Transcript
+ * @typedef {import('./ports.js').EngineKind} EngineKind
  *
- * @typedef {Object} TranscriptionJob
+ * @typedef {Object} TranscriptionRequest  αίτημα μεταγραφής (API-003)
  * @property {Blob & { name?: string }} media
- * @property {import('./ports.js').EngineKind} engineKind
+ * @property {EngineKind} engineKind
  * @property {RecognitionOptions} options
  * @property {{ removeAnoTeleia: boolean }} textOptions
  * @property {AbortSignal} [signal]
@@ -33,8 +37,8 @@ export class TranscriptionService {
   #repository;
   #clock;
   #ids;
-  #speakerLabel;
-  #storage;
+  #speakerLabelFor;
+  #deviceStorage;
 
   /**
    * @param {Object} deps
@@ -42,25 +46,25 @@ export class TranscriptionService {
    * @param {import('./ports.js').TranscriptRepository} deps.repository
    * @param {import('./ports.js').Clock} deps.clock
    * @param {import('./ports.js').IdGenerator} deps.idGenerator
-   * @param {(ordinal: number) => string} deps.speakerLabel  π.χ. n => `Ομιλητής ${n}`
-   * @param {import('./ports.js').StorageEstimator} [deps.storage]
+   * @param {(ordinal: number) => string} deps.speakerLabelFor  π.χ. n => `Ομιλητής ${n}`
+   * @param {import('./ports.js').DeviceStorage} [deps.deviceStorage]
    */
-  constructor({ engines, repository, clock, idGenerator, speakerLabel, storage = null }) {
+  constructor({ engines, repository, clock, idGenerator, speakerLabelFor, deviceStorage = null }) {
     this.#engines = new Map(engines.map(engine => [engine.kind, engine]));
     this.#repository = repository;
     this.#clock = clock;
     this.#ids = idGenerator;
-    this.#speakerLabel = speakerLabel;
-    this.#storage = storage;
+    this.#speakerLabelFor = speakerLabelFor;
+    this.#deviceStorage = deviceStorage;
   }
 
-  /** @returns {import('./ports.js').EngineKind[]} */
+  /** @returns {EngineKind[]} οι μηχανές με τη σειρά που δόθηκαν */
   get engineKinds() {
     return [...this.#engines.keys()];
   }
 
   /**
-   * @param {import('./ports.js').EngineKind} engineKind
+   * @param {EngineKind} engineKind
    * @param {RecognitionOptions} [options]
    * @returns {Promise<import('./ports.js').EngineAvailability>}
    */
@@ -69,12 +73,23 @@ export class TranscriptionService {
   }
 
   /**
-   * @param {TranscriptionJob} job
+   * Τα επίπεδα ποιότητας μιας μηχανής σε αυτή τη συσκευή, ή null όταν η
+   * μηχανή δεν έχει επίπεδα (π.χ. ElevenLabs).
+   * @param {EngineKind} engineKind
+   * @returns {Promise<import('./ports.js').QualityPresetsDescription|null>}
+   */
+  async describeQualityPresets(engineKind) {
+    const engine = this.#engineFor(engineKind);
+    return typeof engine.describeQualityPresets === 'function' ? engine.describeQualityPresets() : null;
+  }
+
+  /**
+   * @param {TranscriptionRequest} request
    * @returns {Promise<Transcript>}
    */
-  async transcribe(job) {
-    const { media, engineKind, options, textOptions, signal, onProgress, onPartialSegments } = job;
-    validateJob(job);
+  async transcribe(request) {
+    const { media, engineKind, options, textOptions, signal, onProgress, onPartialSegments } = request;
+    validateRequest(request);
     const engine = this.#engineFor(engineKind);
     const availability = await engine.checkAvailability(options);
     if (!availability.available) throw new AppError(availability.reason || ERROR_CODES.DEVICE_UNSUPPORTED, `η μηχανή ${engineKind} δεν είναι διαθέσιμη`);
@@ -88,7 +103,7 @@ export class TranscriptionService {
     throwIfAborted(signal);
 
     const cleaned = cleanSegments(result.segments, textOptions);
-    const { speakers, speakerIdByKey } = speakersFromKeys(cleaned, this.#speakerLabel);
+    const { speakers, speakerIdByKey } = speakersFromKeys(cleaned, this.#speakerLabelFor);
     const now = this.#clock.nowIso();
     const transcript = createTranscript({
       id: this.#ids.newId(),
@@ -100,7 +115,7 @@ export class TranscriptionService {
         sizeBytes: media.size,
         durationSec: result.durationSec ?? null,
       },
-      languageCode: result.languageCode || (options.languageCode === AUTO_LANGUAGE_CODE ? null : options.languageCode),
+      languageCode: result.languageCode || explicitLanguageCode(options.languageCode),
       engine: { kind: engineKind, model: result.model },
       speakers,
       segments: cleaned.map((segment, index) => ({
@@ -115,23 +130,29 @@ export class TranscriptionService {
 
     onProgress?.({ stage: PROGRESS_STAGES.SAVING });
     await this.#repository.save(transcript);
-    if (this.#storage) await this.#storage.requestPersistence().catch(() => false);
+    if (this.#deviceStorage) await this.#deviceStorage.requestPersistence().catch(() => false);
     return transcript;
   }
 
   #engineFor(kind) {
     const engine = this.#engines.get(kind);
-    if (!engine) throw new AppError(ERROR_CODES.INVALID_INPUT, `άγνωστη μηχανή ${kind}`);
+    // Λάθος προγραμματισμού (API-001): η διεπαφή προσφέρει μόνο τις μηχανές του engineKinds.
+    if (!engine) throw new RangeError(`άγνωστη μηχανή ${kind}`);
     return engine;
   }
 }
 
-function validateJob({ media, options, textOptions }) {
-  if (!media || typeof media.size !== 'number' || media.size <= 0) throw new AppError(ERROR_CODES.INVALID_INPUT, 'κενό ή άκυρο αρχείο');
-  if (!options || !isSupportedLanguageCode(options.languageCode)) throw new AppError(ERROR_CODES.INVALID_INPUT, `μη υποστηριζόμενη γλώσσα ${options && options.languageCode}`);
+/**
+ * Το κενό αρχείο το διορθώνει ο χρήστης (INVALID_INPUT). Τα υπόλοιπα τα
+ * εγγυάται η διεπαφή, άρα αν λείπουν είναι λάθος προγραμματισμού.
+ */
+function validateRequest({ media, options, textOptions }) {
+  if (!media || typeof media.size !== 'number') throw new TypeError('λείπει το αρχείο');
+  if (media.size <= 0) throw invalidInput(INPUT_ISSUES.EMPTY_FILE, 'κενό αρχείο');
+  if (!options || !isSupportedLanguageCode(options.languageCode)) throw new RangeError(`μη υποστηριζόμενη γλώσσα ${options && options.languageCode}`);
   const n = options.expectedSpeakers;
-  if (n != null && !(Number.isInteger(n) && n >= 1 && n <= MAX_EXPECTED_SPEAKERS)) throw new AppError(ERROR_CODES.INVALID_INPUT, `μη έγκυρο πλήθος ομιλητών ${n}`);
-  if (!textOptions || typeof textOptions.removeAnoTeleia !== 'boolean') throw new AppError(ERROR_CODES.INVALID_INPUT, 'λείπουν οι επιλογές κειμένου');
+  if (n != null && !(Number.isInteger(n) && n >= 1 && n <= MAX_EXPECTED_SPEAKERS)) throw new RangeError(`μη έγκυρο πλήθος ομιλητών ${n}`);
+  if (!textOptions || typeof textOptions.removeAnoTeleia !== 'boolean') throw new TypeError('λείπουν οι επιλογές κειμένου');
 }
 
 /**

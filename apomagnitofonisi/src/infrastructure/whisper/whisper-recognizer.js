@@ -2,6 +2,7 @@
  * Το Whisper μέσα στον worker: φόρτωση του pipeline του Transformers.js και
  * μεταγραφή ενός παραθύρου (έως 30 s) με χρόνους ανά φράση.
  */
+import { PCM_SAMPLE_RATE } from '../../domain/audio/pcm.js';
 
 /**
  * Ρύθμιση του Transformers.js: μοντέλα μόνο από το Hugging Face, αποθήκευση
@@ -53,16 +54,16 @@ export class WhisperRecognizer {
   }
 
   /**
-   * @param {Float32Array} samples  PCM 16 kHz
-   * @param {{ startSec: number, language: string|null }} options
+   * @param {Float32Array} samples  PCM με PCM_SAMPLE_RATE
+   * @param {{ startSec: number, whisperLanguage: string|null }} options  null: αυτόματη ανίχνευση γλώσσας
    * @returns {Promise<{ start: number, end: number, text: string }[]>} χρόνοι του αρχείου
    */
-  async transcribe(samples, { startSec, language }) {
-    const windowSec = samples.length / 16000;
+  async transcribe(samples, { startSec, whisperLanguage }) {
+    const windowSec = samples.length / PCM_SAMPLE_RATE;
     const output = await this.#pipe(samples, {
       task: 'transcribe',
       return_timestamps: true,
-      ...(language ? { language } : {}),
+      ...(whisperLanguage ? { language: whisperLanguage } : {}),
     });
     const chunks = Array.isArray(output.chunks) && output.chunks.length ? output.chunks : [{ timestamp: [0, windowSec], text: output.text }];
     return chunks

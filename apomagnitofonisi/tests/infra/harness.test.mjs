@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { resolvePagesPath, startPagesServer } from '../browser/harness.mjs';
 import { parseHeaderRules } from '../../tools/headers.mjs';
-import { launchOptions, ignoreHttpsErrors, candidatesFromBrowsersPath } from '../../tools/browser.mjs';
+import { launchOptions, shouldIgnoreHttpsErrors, candidatesFromBrowsersPath } from '../../tools/browser.mjs';
 import { tempDir } from './helpers.mjs';
 
 /* Ο τοπικός server των ελέγχων στον browser (tests/browser/harness.mjs) πρέπει
@@ -78,6 +78,6 @@ test('ο Chromium βρίσκεται από ρητή διαδρομή, από γ
   assert.deepEqual(candidatesFromBrowsersPath(path.join(dir, 'pw')).map(p => path.relative(dir, p)),
     ['pw/chromium-1/chrome-linux/chrome', 'pw/chromium-1/chrome-linux/headless_shell', 'pw/chromium-1/chrome-linux64/chrome']);
   assert.deepEqual(candidatesFromBrowsersPath(path.join(dir, 'missing')), []);
-  assert.equal(ignoreHttpsErrors({ APOMAGN_BROWSER_IGNORE_TLS: '1' }), true);
-  assert.equal(ignoreHttpsErrors({}), false, 'στο CI ποτέ');
+  assert.equal(shouldIgnoreHttpsErrors({ APOMAGN_BROWSER_IGNORE_TLS: '1' }), true);
+  assert.equal(shouldIgnoreHttpsErrors({}), false, 'στο CI ποτέ');
 });

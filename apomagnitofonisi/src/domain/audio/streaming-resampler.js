@@ -8,12 +8,16 @@
  * παρεμβολή, οπότε μία ώρα ήχου επεξεργάζεται σε λίγα δευτερόλεπτα.
  *
  * Η κατάσταση (τα τελευταία δείγματα εισόδου) κρατιέται ανάμεσα στις κλήσεις
- * του `process()`, άρα το αποτέλεσμα είναι ίδιο είτε ο ήχος έρθει σε ένα
+ * του `push()`, άρα το αποτέλεσμα είναι ίδιο είτε ο ήχος έρθει σε ένα
  * κομμάτι είτε σε χιλιάδες. Το `flush()` βγάζει την ουρά στο τέλος.
  */
+import { PCM_SAMPLE_RATE } from './pcm.js';
+
 const TABLE_RESOLUTION = 512;
 
 export class StreamingResampler {
+  #inputRate;
+  #outputRate;
   #ratio;
   #halfWidth;
   #table;
@@ -31,10 +35,10 @@ export class StreamingResampler {
    * @param {number} [options.zeroCrossings]  μισό πλάτος πυρήνα σε μηδενισμούς του sinc
    * @param {number} [options.rolloff]  κλάσμα της συχνότητας Nyquist
    */
-  constructor({ inputRate, outputRate = 16000, zeroCrossings = 8, rolloff = 0.92 }) {
+  constructor({ inputRate, outputRate = PCM_SAMPLE_RATE, zeroCrossings = 8, rolloff = 0.92 }) {
     if (!(inputRate > 0) || !(outputRate > 0)) throw new RangeError('οι συχνότητες πρέπει να είναι θετικές');
-    this.inputRate = inputRate;
-    this.outputRate = outputRate;
+    this.#inputRate = inputRate;
+    this.#outputRate = outputRate;
     this.#ratio = inputRate / outputRate;
     this.#passthrough = inputRate === outputRate;
     const downsampling = Math.max(1, this.#ratio);
@@ -43,8 +47,21 @@ export class StreamingResampler {
     this.#table = buildKernelTable(this.#halfWidth, cutoff);
   }
 
-  /** Δέχεται νέα δείγματα και επιστρέφει όσα δείγματα εξόδου μπορούν να υπολογιστούν. */
-  process(input) {
+  /** Η συχνότητα εισόδου (Hz), μόνο για ανάγνωση. */
+  get inputRate() {
+    return this.#inputRate;
+  }
+
+  /** Η συχνότητα εξόδου (Hz), μόνο για ανάγνωση. */
+  get outputRate() {
+    return this.#outputRate;
+  }
+
+  /**
+   * Δέχεται νέα δείγματα και επιστρέφει όσα δείγματα εξόδου μπορούν να
+   * υπολογιστούν (ίδιο ρήμα με το AudioWindowAssembler.push).
+   */
+  push(input) {
     if (this.#flushed) throw new Error('ο resampler έχει ήδη τελειώσει (flush)');
     if (this.#passthrough) {
       this.#inputCount += input.length;

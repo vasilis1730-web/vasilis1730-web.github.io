@@ -4,8 +4,8 @@ import {
   parseHeaderRules, ruleMatches, headersFor, cspOf, directiveSources, effectiveSources, sourceAllowsUrl, cspAllows,
 } from '../../tools/headers.mjs';
 import {
-  findForbiddenCharacters, findSecrets, urlLiteralsIn, checkScriptUrls, checkVendorModule, pinnedJsdelivrVersion,
-  checkVendorUrlsOutsideVendorModule, checkHtml, inspectPublishedSources, VENDOR_MODULE,
+  findForbiddenCharacters, findSecrets, urlLiteralsIn, checkScriptUrls, checkVendorModule, checkJsdelivrPin,
+  checkVendorUrlsOutsideVendorModule, checkHtml, findPublishedSourceProblems, VENDOR_MODULE,
 } from '../../tools/source-checks.mjs';
 
 /* Οι καθαρές συναρτήσεις των εργαλείων ελέγχου (tools/headers.mjs και
@@ -99,14 +99,14 @@ test('τα URL του κώδικα: μόνο συμβολοσειρές https, �
 });
 
 test('οι βιβλιοθήκες τρίτων: μόνο στο vendor.js, μόνο jsDelivr με ακριβή έκδοση, επιτρεπτές από την CSP', () => {
-  assert.deepEqual(pinnedJsdelivrVersion('https://cdn.jsdelivr.net/npm/mediabunny@1.65.1/dist/bundles/mediabunny.min.mjs'), { ok: true, packageNamed: true, version: '1.65.1' });
-  assert.equal(pinnedJsdelivrVersion('https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@1.4.0/+esm').version, '1.4.0', 'scoped πακέτο με +esm');
-  assert.equal(pinnedJsdelivrVersion('https://cdn.jsdelivr.net/npm/pkg@4.4.0-next.0/x.js').ok, true, 'προέκδοση με ακριβή αριθμό');
-  assert.match(pinnedJsdelivrVersion('https://cdn.jsdelivr.net/npm/mediabunny/dist/x.mjs').reason, /χωρίς έκδοση/);
-  assert.match(pinnedJsdelivrVersion('https://cdn.jsdelivr.net/npm/mediabunny@1/dist/x.mjs').reason, /δεν είναι ακριβής/);
-  assert.match(pinnedJsdelivrVersion('https://cdn.jsdelivr.net/npm/mediabunny@latest/x.mjs').reason, /δεν είναι ακριβής/);
-  assert.match(pinnedJsdelivrVersion('https://unpkg.com/mediabunny@1.65.1/x.mjs').reason, /εκτός jsDelivr/);
-  assert.equal(pinnedJsdelivrVersion('https://cdn.jsdelivr.net/npm/').packageNamed, false, 'πρόθεμα χωρίς πακέτο (service worker)');
+  assert.deepEqual(checkJsdelivrPin('https://cdn.jsdelivr.net/npm/mediabunny@1.65.1/dist/bundles/mediabunny.min.mjs'), { ok: true, packageNamed: true, version: '1.65.1' });
+  assert.equal(checkJsdelivrPin('https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@1.4.0/+esm').version, '1.4.0', 'scoped πακέτο με +esm');
+  assert.equal(checkJsdelivrPin('https://cdn.jsdelivr.net/npm/pkg@4.4.0-next.0/x.js').ok, true, 'προέκδοση με ακριβή αριθμό');
+  assert.match(checkJsdelivrPin('https://cdn.jsdelivr.net/npm/mediabunny/dist/x.mjs').reason, /χωρίς έκδοση/);
+  assert.match(checkJsdelivrPin('https://cdn.jsdelivr.net/npm/mediabunny@1/dist/x.mjs').reason, /δεν είναι ακριβής/);
+  assert.match(checkJsdelivrPin('https://cdn.jsdelivr.net/npm/mediabunny@latest/x.mjs').reason, /δεν είναι ακριβής/);
+  assert.match(checkJsdelivrPin('https://unpkg.com/mediabunny@1.65.1/x.mjs').reason, /εκτός jsDelivr/);
+  assert.equal(checkJsdelivrPin('https://cdn.jsdelivr.net/npm/').packageNamed, false, 'πρόθεμα χωρίς πακέτο (service worker)');
 
   const csp = "script-src 'self' https://cdn.jsdelivr.net; connect-src 'self' https://cdn.jsdelivr.net";
   assert.deepEqual(checkVendorModule({ text: "export const A = 'https://cdn.jsdelivr.net/npm/a@1.2.3/a.mjs';", csp }), []);
@@ -137,7 +137,7 @@ test('οι σελίδες HTML δεν έχουν ό,τι κόβει η αυστ�
 
 test('όλοι οι έλεγχοι μαζί πάνω σε λίστα αρχείων', () => {
   const ano = String.fromCharCode(0x387);
-  const problems = inspectPublishedSources({
+  const problems = findPublishedSourceProblems({
     csp: CSP,
     files: [
       { path: 'index.html', text: '<p>Καλημέρα</p>' },

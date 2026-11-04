@@ -26,8 +26,9 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { chromium } from 'playwright';
-import { ROOT, build, DEFAULT_SITE_URL, PUBLIC_DIR } from '../../tools/build-dist.mjs';
-import { launchOptions, ignoreHttpsErrors } from '../../tools/browser.mjs';
+import { ROOT } from '../../tools/paths.mjs';
+import { build, DEFAULT_SITE_URL, PUBLIC_DIR } from '../../tools/build-dist.mjs';
+import { launchOptions, shouldIgnoreHttpsErrors } from '../../tools/browser.mjs';
 import { parseHeaderRules, headersFor } from '../../tools/headers.mjs';
 
 /** Τύποι περιεχομένου όπως τους στέλνει το Cloudflare Pages για τα αρχεία της εφαρμογής. */
@@ -112,7 +113,7 @@ export async function withSite(run, { serviceWorkers = 'allow', contextOptions =
   const browser = await chromium.launch(launchOptions());
   const context = await browser.newContext({
     locale: 'el-GR',
-    ignoreHTTPSErrors: ignoreHttpsErrors(),
+    ignoreHTTPSErrors: shouldIgnoreHttpsErrors(),
     serviceWorkers,
     acceptDownloads: true,
     ...contextOptions,

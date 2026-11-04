@@ -70,7 +70,7 @@ jobs:
         env:
           VERSION_CODE: ${{ github.event.inputs.version_code }}
         shell: bash
-        run: node tools/android.mjs version --code "${VERSION_CODE}" | tee -a "${GITHUB_OUTPUT}"
+        run: node tools/android.mjs version --version-code "${VERSION_CODE}" | tee -a "${GITHUB_OUTPUT}"
 
       # Το Android SDK είναι προεγκατεστημένο στον runner, το AGP 8.9 θέλει JDK 17+.
       - name: Build (Gradle)

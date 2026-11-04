@@ -6,7 +6,8 @@ import { spawnSync } from 'node:child_process';
 import { PUBLIC_DIR } from '../../tools/build-dist.mjs';
 import { cspOf } from '../../tools/headers.mjs';
 import { findForbiddenCharacters, findSecrets, checkHtml, checkVendorModule, VENDOR_MODULE } from '../../tools/source-checks.mjs';
-import { ROOT, read, exists, skipWhileAppPending, repositoryFiles, TEXT_FILE } from './helpers.mjs';
+import { ROOT } from '../../tools/paths.mjs';
+import { read, exists, skipWhileAppPending, repositoryFiles, TEXT_FILE } from './helpers.mjs';
 
 /* Υγιεινή όλου του repository: κανόνες που ισχύουν σε κάθε αρχείο, όχι μόνο
    σε όσα δημοσιεύονται. */

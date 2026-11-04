@@ -46,15 +46,25 @@ npm run test:browser   # πραγματικός Chromium πάνω στο dist μ
   χρήστης δηλώνονται στο `NAVIGATION_HOSTS` του `tools/source-checks.mjs`. Όχι
   inline script ή style, όχι `on…=` και `style=` στο HTML, όχι import maps.
 - **Βιβλιοθήκες τρίτων**: μόνο στο `src/config/vendor.js`, από το jsDelivr, σε
-  **ακριβή** έκδοση (`pkg@X.Y.Z`). Φορτώνονται με δυναμικό `import()` μόνο όταν χρειάζονται.
+  **ακριβή** έκδοση (`pkg@X.Y.Z`). Φορτώνονται με δυναμικό `import()` μόνο όταν
+  χρειάζονται, και μόνο μέσω του `src/infrastructure/vendor-loader.js`.
+- **Στρώματα (Clean Architecture)**: `domain` → μόνο `domain`, `application` →
+  `application`/`domain`/`config`, `infrastructure` → `infrastructure`/`application`/`domain`/`config`,
+  `ui` → `ui`/`application`/`domain`/`config`, `config` → τίποτα. Μόνο το
+  `src/main.js` συνδέει adapters (και μόνο εκεί `new Worker(`). Μετρούν και οι
+  τύποι JSDoc `import('…')`: μια προβολή δεν γράφει τύπο από το `infrastructure/`,
+  ο τύπος μπαίνει ως θύρα στο `src/application/ports.js`. Το ελέγχει το
+  `tests/infra/architecture.test.mjs` (κανόνες στο `tools/import-graph.mjs`).
 - **COOP/COEP**: η σελίδα είναι cross-origin isolated (πολυνηματικό WASM). Κάθε
   πόρος τρίτου φορτώνεται με CORS.
 - **Κλειδιά**: τα κλειδιά των χρηστών μένουν στη συσκευή τους. Κανένα κλειδί στο
   repository (το ελέγχει το `npm test`). Τα δικά μας (Cloudflare, keystore) μόνο στα GitHub secrets.
 - **Πολιτική απορρήτου**: δημόσια εφαρμογή, άρα τα κείμενα του `privacy.html`
   πρέπει να γράφουν τους πραγματικούς παρόχους (ElevenLabs, Anthropic, Hugging
-  Face, jsDelivr, Cloudflare). Το email επικοινωνίας είναι ακόμη `__CONTACT_EMAIL__`
-  και το deploy αρνείται μέχρι να οριστεί (`docs/DEPLOYMENT.md` §6).
+  Face, jsDelivr, Cloudflare). Το email επικοινωνίας ζει στο `CONTACT_EMAIL` του
+  `src/config/app-info.js` (εκεί και το `SITE_URL`, που διαβάζει και το build) και
+  πρέπει να γράφεται ίδιο στο `privacy.html`. Όσο είναι ακόμη `__CONTACT_EMAIL__`,
+  το `node tools/build-dist.mjs --check-contact` του deploy αρνείται (`docs/DEPLOYMENT.md` §6).
 - **Ονόματα αρχείων που παράγει η εφαρμογή για τον χρήστη** (Word, υπότιτλοι,
   κείμενο): με κενά, ποτέ με κάτω παύλες.
 - Workflows: μόνο `test.yml`, `deploy.yml` και το χειροκίνητο `android.yml`.
@@ -75,6 +85,9 @@ npm run test:browser   # πραγματικός Chromium πάνω στο dist μ
 - Αλλαγή σε όνομα, χρώματα ή share target του `manifest.json` θέλει την ίδια
   αλλαγή στο Android (το `npm test` κοκκινίζει) και νέα έκδοση στο Play. Αλλαγή
   σε HTML, JS ή CSS όχι.
+- `tools/android.mjs`: `version`, `inspect` και `release` με την ίδια παράμετρο
+  `--version-code` (π.χ. `node tools/android.mjs version --version-code 2026110415`),
+  κάθε άλλη παράμετρος μιας εντολής απορρίπτεται.
 - Το keystore και οι κωδικοί του **ποτέ** στο repository, μόνο στα GitHub secrets
   (ίδιο keystore με τις εφαρμογές ΡΟΔΙΟΣ).
 

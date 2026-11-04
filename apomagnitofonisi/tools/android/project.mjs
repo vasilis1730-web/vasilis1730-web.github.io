@@ -9,7 +9,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { ROOT } from '../paths.mjs';
 
-export { ROOT };
 export const ANDROID_DIR = 'android';
 
 /** Οι εφαρμογές, με το όνομα του φακέλου τους στο android/. Σήμερα μία. */

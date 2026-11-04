@@ -31,7 +31,7 @@
  * @property {string} id
  * @property {SummaryKind} kind
  * @property {string} [instruction]  μόνο για kind 'custom'
- * @property {string} model
+ * @property {string} model  το αναγνωριστικό του μοντέλου που την έγραψε (π.χ. claude-opus-5-5)
  * @property {string} createdAt  ISO 8601
  * @property {string} text  Markdown
  * @property {boolean} [truncated]  το μοντέλο σταμάτησε στο όριο μήκους
@@ -51,7 +51,7 @@
  * @typedef {Object} Transcript
  * @property {number} schemaVersion
  * @property {string} id
- * @property {string} title
+ * @property {string} title  από τον χρήστη ή το όνομα αρχείου, μπορεί να είναι κενός
  * @property {string} createdAt
  * @property {string} updatedAt
  * @property {TranscriptSource} source
@@ -78,11 +78,28 @@ export const SPEAKER_COLOR_COUNT = 10;
 
 const MAX_TITLE_LENGTH = 200;
 
+/**
+ * Οι κανόνες του μοντέλου που μπορεί να παραβιαστούν. Μόνο το EMPTY_SPEAKER_NAME
+ * οφείλεται στον χρήστη, τα υπόλοιπα είναι λάθη του κώδικα που καλεί.
+ */
+export const TRANSCRIPT_RULES = Object.freeze({
+  EMPTY_SPEAKER_NAME: 'empty-speaker-name',
+  UNKNOWN_SPEAKER: 'unknown-speaker',
+  UNKNOWN_SEGMENT: 'unknown-segment',
+  UNKNOWN_SUMMARY: 'unknown-summary',
+  INVALID_DATA: 'invalid-data',
+});
+
 /** Παραβίαση κανόνα του μοντέλου (π.χ. τμήμα που δείχνει σε άγνωστο ομιλητή). */
 export class TranscriptRuleError extends Error {
-  constructor(message) {
+  /**
+   * @param {string} message
+   * @param {typeof TRANSCRIPT_RULES[keyof typeof TRANSCRIPT_RULES]} [rule]
+   */
+  constructor(message, rule = TRANSCRIPT_RULES.INVALID_DATA) {
     super(message);
     this.name = 'TranscriptRuleError';
+    this.rule = rule;
   }
 }
 
@@ -138,10 +155,10 @@ export function createTranscript(init) {
  * σταθερά αναγνωριστικά S1, S2, … με τη σειρά που μιλούν πρώτη φορά.
  *
  * @param {{ speakerKey: string|null }[]} recognized  ταξινομημένα κατά χρόνο
- * @param {(ordinal: number) => string} labelFor  π.χ. n => `Ομιλητής ${n}`
+ * @param {(ordinal: number) => string} speakerLabelFor  π.χ. n => `Ομιλητής ${n}`
  * @returns {{ speakers: Speaker[], speakerIdByKey: Map<string, string> }}
  */
-export function speakersFromKeys(recognized, labelFor) {
+export function speakersFromKeys(recognized, speakerLabelFor) {
   const speakerIdByKey = new Map();
   const speakers = [];
   for (const item of recognized) {
@@ -150,21 +167,20 @@ export function speakersFromKeys(recognized, labelFor) {
     const ordinal = speakers.length + 1;
     const id = `S${ordinal}`;
     speakerIdByKey.set(key, id);
-    speakers.push({ id, label: labelFor(ordinal), colorIndex: (ordinal - 1) % SPEAKER_COLOR_COUNT });
+    speakers.push({ id, label: speakerLabelFor(ordinal), colorIndex: (ordinal - 1) % SPEAKER_COLOR_COUNT });
   }
   return { speakers, speakerIdByKey };
 }
 
 /* ---------------------------------------------------------------- αλλαγές */
 
-/** Νέος τίτλος. Κενός τίτλος → το όνομα του αρχείου. */
+/** Νέος τίτλος. Κενός τίτλος → το όνομα του αρχείου (ή κενός, αν δεν υπάρχει). */
 export function setTitle(transcript, title, now) {
   return touch({ ...transcript, title: normalizeTitle(title, transcript.source.fileName) }, now);
 }
 
 export function renameSpeaker(transcript, speakerId, label, now) {
-  const clean = String(label ?? '').replace(/\s+/g, ' ').trim();
-  if (!clean) throw new TranscriptRuleError('το όνομα ομιλητή δεν μπορεί να είναι κενό');
+  const clean = cleanLabel(label);
   requireSpeaker(transcript, speakerId);
   return touch({
     ...transcript,
@@ -177,8 +193,7 @@ export function renameSpeaker(transcript, speakerId, label, now) {
  * απέδωσε λάθος). Επιστρέφει και το αναγνωριστικό του.
  */
 export function addSpeaker(transcript, label, now) {
-  const clean = String(label ?? '').replace(/\s+/g, ' ').trim();
-  if (!clean) throw new TranscriptRuleError('το όνομα ομιλητή δεν μπορεί να είναι κενό');
+  const clean = cleanLabel(label);
   const used = new Set(transcript.speakers.map(s => s.id));
   let ordinal = transcript.speakers.length + 1;
   while (used.has(`S${ordinal}`)) ordinal += 1;
@@ -217,7 +232,9 @@ export function addSummary(transcript, summary, now) {
   return touch({ ...transcript, summaries: [copy, ...transcript.summaries.filter(s => s.id !== copy.id)] }, now);
 }
 
+/** Αφαιρεί περίληψη. Άγνωστο αναγνωριστικό είναι λάθος, όπως στα τμήματα και τους ομιλητές. */
 export function removeSummary(transcript, summaryId, now) {
+  if (!transcript.summaries.some(s => s.id === summaryId)) throw new TranscriptRuleError(`άγνωστη περίληψη ${summaryId}`, TRANSCRIPT_RULES.UNKNOWN_SUMMARY);
   return touch({ ...transcript, summaries: transcript.summaries.filter(s => s.id !== summaryId) }, now);
 }
 
@@ -264,11 +281,6 @@ export function segmentIndexAt(transcript, timeSec) {
   return found;
 }
 
-/** Το κείμενο όλων των τμημάτων, για αναζήτηση και αντιγραφή. */
-export function plainText(transcript) {
-  return transcript.segments.map(s => s.text).filter(Boolean).join('\n');
-}
-
 /* ---------------------------------------------------------------- βοηθητικά */
 
 function touch(transcript, now) {
@@ -285,12 +297,19 @@ function replaceSegment(transcript, segmentId, change) {
     found = true;
     return change(seg);
   });
-  if (!found) throw new TranscriptRuleError(`άγνωστο τμήμα ${segmentId}`);
+  if (!found) throw new TranscriptRuleError(`άγνωστο τμήμα ${segmentId}`, TRANSCRIPT_RULES.UNKNOWN_SEGMENT);
   return segments;
 }
 
 function requireSpeaker(transcript, speakerId) {
-  if (!transcript.speakers.some(s => s.id === speakerId)) throw new TranscriptRuleError(`άγνωστος ομιλητής ${speakerId}`);
+  if (!transcript.speakers.some(s => s.id === speakerId)) throw new TranscriptRuleError(`άγνωστος ομιλητής ${speakerId}`, TRANSCRIPT_RULES.UNKNOWN_SPEAKER);
+}
+
+/** Όνομα ομιλητή με ένα κενό ανάμεσα στις λέξεις. Κενό όνομα δεν επιτρέπεται. */
+function cleanLabel(label) {
+  const clean = String(label ?? '').replace(/\s+/g, ' ').trim();
+  if (!clean) throw new TranscriptRuleError('το όνομα ομιλητή δεν μπορεί να είναι κενό', TRANSCRIPT_RULES.EMPTY_SPEAKER_NAME);
+  return clean;
 }
 
 function requireText(value, name) {
@@ -306,7 +325,9 @@ function normalizeTitle(title, fileName) {
   const clean = String(title ?? '').replace(/\s+/g, ' ').trim();
   if (clean) return clean.slice(0, MAX_TITLE_LENGTH);
   const fromFile = String(fileName || '').replace(/\.[^.]+$/, '').replace(/[_]+/g, ' ').replace(/\s+/g, ' ').trim();
-  return (fromFile || 'Μεταγραφή').slice(0, MAX_TITLE_LENGTH);
+  // Χωρίς τίτλο και όνομα αρχείου ο τίτλος μένει κενός: το πώς θα φανεί το
+  // αποφασίζει η διεπαφή (CA-009), όχι το μοντέλο.
+  return fromFile.slice(0, MAX_TITLE_LENGTH);
 }
 
 function copySpeaker(s) {

@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { OUTPUTS, SVG_OUTPUTS, PALETTE, iconSvg, glyphSvg, featureGraphicHtml } from '../../tools/make-icons.mjs';
-import { ROOT, exists } from './helpers.mjs';
+import { ROOT } from '../../tools/paths.mjs';
+import { exists } from './helpers.mjs';
 
 /* Τα εικονίδια (tools/make-icons.mjs): μία πηγή, σωστές διαστάσεις, και το
    maskable με το σχέδιο μέσα στη ζώνη ασφαλείας του Android (κύκλος με ακτίνα
