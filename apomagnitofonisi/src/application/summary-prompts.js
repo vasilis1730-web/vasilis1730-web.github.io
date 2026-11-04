@@ -6,7 +6,7 @@
  * διαφορετικά είδη περίληψης της ίδιας μεταγραφής, ώστε το prompt caching
  * του παρόχου να τα ξαναχρησιμοποιεί και η δεύτερη περίληψη να κοστίζει λίγο.
  */
-import { SUMMARY_KINDS, transcriptDuration, findSpeaker } from '../domain/transcript.js';
+import { SUMMARY_KINDS, transcriptDuration, segmentSpeakerLabel } from '../domain/transcript.js';
 import { formatClock } from '../domain/time-format.js';
 import { INPUT_ISSUES, invalidInput } from './errors.js';
 
@@ -65,7 +65,10 @@ export function buildSummaryInstruction(kind, customInstruction = '') {
 
 /**
  * Η μεταγραφή ως κείμενο για το μοντέλο: κεφαλίδα με τίτλο, διάρκεια και
- * ομιλητές, και μία γραμμή «[hh:mm:ss] Όνομα: κείμενο» ανά τμήμα.
+ * ομιλητές, και μία γραμμή «[hh:mm:ss] Όνομα: κείμενο» ανά τμήμα. Χωρίς
+ * ομιλητές η γραμμή είναι «[hh:mm:ss] κείμενο», με τον ίδιο κανόνα που
+ * ακολουθούν οι εξαγωγές (segmentSpeakerLabel, OO-020): το μοντέλο δεν βλέπει
+ * έναν «άγνωστο ομιλητή» σε κάθε γραμμή, για να τον γράψει στους συμμετέχοντες.
  *
  * @param {import('../domain/transcript.js').Transcript} transcript
  * @param {{ unknownSpeaker: string }} labels
@@ -77,8 +80,8 @@ export function formatTranscriptForPrompt(transcript, { unknownSpeaker }) {
   if (transcript.speakers.length) lines.push(`Ομιλητές: ${transcript.speakers.map(s => s.label).join(', ')}`);
   lines.push('');
   for (const segment of transcript.segments) {
-    const speaker = segment.speakerId ? findSpeaker(transcript, segment.speakerId) : null;
-    lines.push(`[${formatClock(segment.start)}] ${speaker ? speaker.label : unknownSpeaker}: ${segment.text}`);
+    const speaker = segmentSpeakerLabel(transcript, segment, { unknown: unknownSpeaker });
+    lines.push(`[${formatClock(segment.start)}] ${speaker === null ? '' : `${speaker}: `}${segment.text}`);
   }
   lines.push('</μεταγραφή>');
   return lines.join('\n');

@@ -8,7 +8,8 @@ import { detectCapabilities, createCachedCapabilityDetector } from '../../../src
 import { BrowserDeviceStorage } from '../../../src/infrastructure/platform/device-storage.js';
 import { BrowserFileDelivery } from '../../../src/infrastructure/platform/file-delivery.js';
 import { BrowserClipboard } from '../../../src/infrastructure/platform/clipboard.js';
-import { BrowserModelCache, MODEL_CACHE_NAMES } from '../../../src/infrastructure/platform/model-cache.js';
+import { BrowserModelCache } from '../../../src/infrastructure/platform/model-cache.js';
+import { WHISPER_MODEL_CACHE_NAME } from '../../../src/infrastructure/whisper/whisper-recognizer.js';
 import { BrowserSharedFileInbox, SHARE_INBOX_CACHE, SHARED_FILE_NAME_HEADER } from '../../../src/infrastructure/platform/shared-file-inbox.js';
 import { createRandomIdGenerator } from '../../../src/infrastructure/platform/random-ids.js';
 import { AppError, ERROR_CODES } from '../../../src/application/errors.js';
@@ -205,15 +206,19 @@ test('πρόχειρο: αντιγραφή, και DEVICE_UNSUPPORTED όταν �
 
 test('μοντέλα στη συσκευή: μέγεθος από τα Content-Length και διαγραφή', async () => {
   const caches = new MemoryCaches();
-  const models = new BrowserModelCache({ caches });
+  const models = new BrowserModelCache({ caches, cacheNames: [WHISPER_MODEL_CACHE_NAME] });
   assert.equal(await models.estimateSizeBytes(), 0);
-  const cache = await caches.open(MODEL_CACHE_NAMES[0]);
+  const cache = await caches.open(WHISPER_MODEL_CACHE_NAME);
   await cache.put('https://hf/a.onnx', new Response('abc', { headers: { 'Content-Length': '1000' } }));
   await cache.put('https://hf/b.json', new Response('{}', { headers: { 'Content-Length': '24' } }));
-  assert.equal(await models.estimateSizeBytes(), 1024);
+  const other = await caches.open('άλλη-cache');
+  await other.put('https://x/c', new Response('x', { headers: { 'Content-Length': '5' } }));
+  assert.equal(await models.estimateSizeBytes(), 1024, 'μόνο οι caches που δόθηκαν');
   await models.clear();
-  assert.equal(await caches.has(MODEL_CACHE_NAMES[0]), false);
-  assert.equal(await new BrowserModelCache({ caches: undefined }).estimateSizeBytes(), null);
+  assert.equal(await caches.has(WHISPER_MODEL_CACHE_NAME), false);
+  assert.equal(await caches.has('άλλη-cache'), true, 'οι άλλες caches μένουν');
+  assert.equal(await new BrowserModelCache({ caches: undefined, cacheNames: [WHISPER_MODEL_CACHE_NAME] }).estimateSizeBytes(), null);
+  assert.throws(() => new BrowserModelCache({ caches }), TypeError, 'χωρίς ονόματα caches δεν στήνεται (λάθος σύνδεση)');
 });
 
 test('αρχεία από κοινή χρήση: παραλαβή μία φορά, και διαγραφή', async () => {

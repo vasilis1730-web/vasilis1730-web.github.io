@@ -1,23 +1,29 @@
 /**
- * Τα μοντέλα που κατέβηκαν στη συσκευή (το Transformers.js τα κρατά στην
- * Cache Storage «transformers-cache», το ONNX Runtime τα .wasm του στην ίδια).
+ * Τα μοντέλα που κατέβηκαν στη συσκευή, στην Cache Storage του browser.
  * Μέγεθος και διαγραφή, για τις Ρυθμίσεις. Υλοποιεί τη θύρα ModelCache.
+ *
+ * Τα ονόματα των caches τα δίνει το main.js από τον πάροχο που τα γράφει
+ * (WHISPER_MODEL_CACHE_NAME στο infrastructure/whisper/), ώστε το όνομα να έχει
+ * έναν μόνο ιδιοκτήτη (CA-015): αν αλλάξει εκεί, αλλάζει και ό,τι μετράμε και σβήνουμε.
  */
-export const MODEL_CACHE_NAMES = Object.freeze(['transformers-cache']);
-
 export class BrowserModelCache {
   #caches;
+  #cacheNames;
 
-  /** @param {{ caches: CacheStorage|undefined }} deps */
-  constructor({ caches }) {
+  /** @param {{ caches: CacheStorage|undefined, cacheNames: readonly string[] }} deps */
+  constructor({ caches, cacheNames }) {
+    if (!Array.isArray(cacheNames) || cacheNames.length === 0 || !cacheNames.every(n => typeof n === 'string' && n)) {
+      throw new TypeError('BrowserModelCache: χρειάζεται τουλάχιστον ένα όνομα cache (cacheNames)');
+    }
     this.#caches = caches;
+    this.#cacheNames = Object.freeze([...cacheNames]);
   }
 
   /** Το άθροισμα των Content-Length των αποθηκευμένων αρχείων (byte), ή null χωρίς Cache Storage. */
   async estimateSizeBytes() {
     if (!this.#caches) return null;
     let total = 0;
-    for (const name of MODEL_CACHE_NAMES) {
+    for (const name of this.#cacheNames) {
       if (!(await this.#caches.has(name))) continue;
       const cache = await this.#caches.open(name);
       for (const request of await cache.keys()) {
@@ -31,6 +37,6 @@ export class BrowserModelCache {
 
   async clear() {
     if (!this.#caches) return;
-    for (const name of MODEL_CACHE_NAMES) await this.#caches.delete(name);
+    for (const name of this.#cacheNames) await this.#caches.delete(name);
   }
 }

@@ -96,3 +96,44 @@ export function toAppError(error) {
 export function throwIfAborted(signal) {
   if (signal && signal.aborted) throw new AppError(ERROR_CODES.CANCELLED, 'ακυρώθηκε');
 }
+
+/**
+ * Τρέχει το `teardown` μόλις ακυρωθεί το signal, ή αμέσως αν έχει ήδη
+ * ακυρωθεί: μια ακύρωση που προηγήθηκε της εγγραφής δεν χάνεται (OO-018).
+ * Επιστρέφει συνάρτηση που αφαιρεί τον ακροατή.
+ *
+ * @param {AbortSignal|null|undefined} signal
+ * @param {() => void} teardown
+ * @returns {() => void}
+ */
+export function onAbort(signal, teardown) {
+  if (!signal) return () => {};
+  if (signal.aborted) {
+    teardown();
+    return () => {};
+  }
+  signal.addEventListener('abort', teardown, { once: true });
+  return () => signal.removeEventListener('abort', teardown);
+}
+
+/**
+ * Περιμένει το `promise`, αλλά απορρίπτει αμέσως με CANCELLED αν ακυρωθεί το
+ * signal (πριν ή κατά την αναμονή). Για βήματα που δεν δέχονται signal, π.χ.
+ * την ανάγνωση των στοιχείων ενός μεγάλου αρχείου (OO-018). Το ίδιο το βήμα
+ * συνεχίζει στο παρασκήνιο και το αποτέλεσμά του αγνοείται.
+ *
+ * @template T
+ * @param {Promise<T>} promise
+ * @param {AbortSignal|null|undefined} signal
+ * @returns {Promise<T>}
+ */
+export function untilAborted(promise, signal) {
+  if (!signal) return promise;
+  return new Promise((resolve, reject) => {
+    const unsubscribe = onAbort(signal, () => reject(new AppError(ERROR_CODES.CANCELLED, 'ακυρώθηκε')));
+    promise.then(
+      value => { unsubscribe(); resolve(value); },
+      error => { unsubscribe(); reject(error); },
+    );
+  });
+}

@@ -5,7 +5,7 @@ import { selectLocalModel, resolvePresetId, describeQualityPresets } from '../..
 import { WorkerClient } from '../../../src/infrastructure/whisper/worker-client.js';
 import { WORKER_REQUESTS, WORKER_REPLIES, WORKER_EVENTS } from '../../../src/infrastructure/whisper/worker-protocol.js';
 import { createWhisperWorkerHandler, segmentSamples, throttleProgress } from '../../../src/infrastructure/whisper/whisper-worker-handler.js';
-import { configureTransformers, createDownloadProgress, WhisperRecognizer } from '../../../src/infrastructure/whisper/whisper-recognizer.js';
+import { configureTransformers, createDownloadProgress, WhisperRecognizer, WHISPER_MODEL_CACHE_NAME } from '../../../src/infrastructure/whisper/whisper-recognizer.js';
 import { SpeakerEmbedder } from '../../../src/infrastructure/whisper/speaker-embedder.js';
 import { AppError, ERROR_CODES } from '../../../src/application/errors.js';
 import { PCM_SAMPLE_RATE } from '../../../src/domain/audio/pcm.js';
@@ -186,6 +186,36 @@ test('χωρίς ήχο, χωρίς WebGPU για το «ακριβές», σφ�
   assert.equal(worker.terminated, true);
 });
 
+test('ακύρωση πριν υπάρξει worker: κατά την ανάγνωση ή πριν από την κλήση, χωρίς λήψη μοντέλου (OO-018)', async () => {
+  const workers = [];
+  let probeStarted;
+  const started = new Promise(resolve => { probeStarted = resolve; });
+  const slowProbe = {
+    ...reader([tone(30)]),
+    probe: () => { probeStarted(); return new Promise(() => {}); },
+  };
+  const engine = new LocalWhisperEngine({
+    createWorker: () => { const w = new HandlerWorker(); workers.push(w); return w; },
+    mediaReader: slowProbe,
+    detectCapabilities: async () => WASM_ONLY,
+  });
+  const controller = new AbortController();
+  const recognizing = engine.recognize({ media: {}, options: LOCAL_OPTIONS, signal: controller.signal });
+  await started;
+  controller.abort();
+  await assert.rejects(recognizing, e => e.code === ERROR_CODES.CANCELLED, 'δεν περιμένει το τέλος της ανάγνωσης');
+  assert.equal(workers.length, 0, 'κανένας worker, άρα κανένα LOAD_MODELS');
+
+  let probed = false;
+  const counting = { ...reader([tone(30)]), async probe() { probed = true; return { durationSec: 30, hasAudio: true, hasVideo: false, audioCodec: 'aac' }; } };
+  const already = new AbortController();
+  already.abort();
+  const early = new LocalWhisperEngine({ createWorker: () => { const w = new HandlerWorker(); workers.push(w); return w; }, mediaReader: counting, detectCapabilities: async () => WASM_ONLY });
+  await assert.rejects(early.recognize({ media: {}, options: LOCAL_OPTIONS, signal: already.signal }), e => e.code === ERROR_CODES.CANCELLED);
+  assert.equal(probed, false, 'ήδη ακυρωμένο: ούτε ανάγνωση');
+  assert.equal(workers.length, 0);
+});
+
 test('λογική του worker: σειρά, άγνωστο αίτημα, μεταγραφή πριν τη φόρτωση, σφάλμα μεταγραφής, μεταφορά αποτυπωμάτων', async () => {
   const replies = [];
   let active = 0;
@@ -292,6 +322,7 @@ test('Transformers.js: ρυθμίσεις, συνολική πρόοδος λή�
   configureTransformers(transformers, { wasmThreads: 3 });
   assert.equal(transformers.env.allowLocalModels, false);
   assert.equal(transformers.env.useBrowserCache, true);
+  assert.equal(transformers.env.cacheKey, WHISPER_MODEL_CACHE_NAME, 'το όνομα της cache το ορίζουμε εμείς, ίδιο με ό,τι μετρούν και σβήνουν οι Ρυθμίσεις (CA-015)');
   assert.equal(transformers.env.backends.onnx.wasm.numThreads, 3);
 
   const totals = [];

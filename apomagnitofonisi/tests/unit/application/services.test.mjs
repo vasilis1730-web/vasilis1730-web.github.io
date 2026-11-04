@@ -9,7 +9,7 @@ import { ApiKeyService } from '../../../src/application/api-key-service.js';
 import { KEY_PROVIDERS, KEY_RETENTIONS } from '../../../src/application/key-providers.js';
 import { DataErasureService } from '../../../src/application/data-erasure-service.js';
 import { ERASE_TARGETS } from '../../../src/application/erase-targets.js';
-import { AppError, ERROR_CODES, INPUT_ISSUES, invalidInput, isAppError, toAppError, isCancellation, throwIfAborted } from '../../../src/application/errors.js';
+import { AppError, ERROR_CODES, INPUT_ISSUES, invalidInput, isAppError, toAppError, isCancellation, throwIfAborted, onAbort, untilAborted } from '../../../src/application/errors.js';
 import { createTranscript, addSummary, TranscriptRuleError, TRANSCRIPT_RULES } from '../../../src/domain/transcript.js';
 import { serializeTranscript } from '../../../src/domain/transcript-codec.js';
 import { MemoryRepository, MemoryDeviceStorage, fixedClock, sequentialIds, MemorySettingsStore, MemoryKeyStore } from '../helpers/fakes.mjs';
@@ -247,4 +247,35 @@ test('σφάλματα: μετατροπή άγνωστων και ακυρώσ�
   throwIfAborted(controller.signal);
   controller.abort();
   assert.throws(() => throwIfAborted(controller.signal), e => e.code === ERROR_CODES.CANCELLED);
+});
+
+test('onAbort και untilAborted: η ακύρωση πιάνεται και όταν προηγήθηκε (OO-018)', async () => {
+  const calls = [];
+  const live = new AbortController();
+  const unsubscribe = onAbort(live.signal, () => calls.push('live'));
+  live.abort();
+  live.abort();
+  assert.deepEqual(calls, ['live'], 'μία φορά');
+  unsubscribe();
+
+  const early = new AbortController();
+  early.abort();
+  onAbort(early.signal, () => calls.push('early'));
+  assert.deepEqual(calls, ['live', 'early'], 'ήδη ακυρωμένο: τρέχει αμέσως');
+
+  const removed = new AbortController();
+  onAbort(removed.signal, () => calls.push('removed'))();
+  removed.abort();
+  assert.equal(calls.includes('removed'), false, 'μετά την αφαίρεση δεν τρέχει');
+  assert.doesNotThrow(() => onAbort(undefined, () => calls.push('none'))());
+
+  assert.equal(await untilAborted(Promise.resolve(7), undefined), 7);
+  assert.equal(await untilAborted(Promise.resolve(8), new AbortController().signal), 8);
+  await assert.rejects(untilAborted(Promise.reject(new Error('x')), new AbortController().signal), /x/);
+  const waiting = new AbortController();
+  const never = new Promise(() => {});
+  const pending = untilAborted(never, waiting.signal);
+  waiting.abort();
+  await assert.rejects(pending, e => e.code === ERROR_CODES.CANCELLED, 'δεν περιμένει το βήμα που κρέμεται');
+  await assert.rejects(untilAborted(never, early.signal), e => e.code === ERROR_CODES.CANCELLED);
 });

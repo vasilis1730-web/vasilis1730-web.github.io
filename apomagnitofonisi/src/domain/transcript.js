@@ -265,6 +265,25 @@ export function findSpeaker(transcript, speakerId) {
   return transcript.speakers.find(s => s.id === speakerId) || null;
 }
 
+/**
+ * Το όνομα του ομιλητή ενός τμήματος, με έναν κανόνα για όλα τα κείμενα που
+ * βγάζει η εφαρμογή (εξαγωγές και prompt περίληψης, OO-020):
+ * - μεταγραφή χωρίς ομιλητές (π.χ. στη συσκευή χωρίς διαχωρισμό): null, άρα
+ *   καμία ετικέτα ομιλητή στις γραμμές,
+ * - τμήμα χωρίς ομιλητή ή με ομιλητή που δεν υπάρχει πια: η ετικέτα `unknown`,
+ * - αλλιώς το όνομα του ομιλητή.
+ *
+ * @param {Transcript} transcript
+ * @param {Segment} segment
+ * @param {{ unknown: string }} labels
+ * @returns {string|null}
+ */
+export function segmentSpeakerLabel(transcript, segment, { unknown }) {
+  if (!transcript.speakers.length) return null;
+  const speaker = segment.speakerId ? findSpeaker(transcript, segment.speakerId) : null;
+  return speaker ? speaker.label : unknown;
+}
+
 export function findSummary(transcript, summaryId) {
   return transcript.summaries.find(s => s.id === summaryId) || null;
 }

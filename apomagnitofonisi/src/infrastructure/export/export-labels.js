@@ -5,7 +5,7 @@
  *
  * @typedef {import('../../application/ports.js').ExportLabels} ExportLabels
  */
-import { transcriptDuration, findSpeaker } from '../../domain/transcript.js';
+import { transcriptDuration, segmentSpeakerLabel } from '../../domain/transcript.js';
 import { formatClock } from '../../domain/time-format.js';
 
 /** Ο τίτλος της μεταγραφής, ή η ετικέτα «χωρίς τίτλο». */
@@ -29,9 +29,7 @@ export function summaryHeading(transcript, summary, labels) {
   return `${labels.summaryTitleFor(summary.kind)}: ${titleOf(transcript, labels)}`;
 }
 
-/** Το όνομα του ομιλητή ενός τμήματος, ή null όταν δεν υπάρχει ομιλητής. */
+/** Το όνομα του ομιλητή ενός τμήματος, ή null σε μεταγραφή χωρίς ομιλητές (κανόνας του domain, OO-020). */
 export function speakerNameOf(transcript, segment, labels) {
-  if (!segment.speakerId) return transcript.speakers.length ? labels.unknownSpeaker : null;
-  const speaker = findSpeaker(transcript, segment.speakerId);
-  return speaker ? speaker.label : labels.unknownSpeaker;
+  return segmentSpeakerLabel(transcript, segment, { unknown: labels.unknownSpeaker });
 }

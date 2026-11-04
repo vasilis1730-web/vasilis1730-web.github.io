@@ -29,6 +29,10 @@ test('το prompt: γραμμές με χρόνο και όνομα, και οδ
   assert.throws(() => buildSummaryInstruction('poem'), RangeError, 'άγνωστο είδος: λάθος του κώδικα');
   const untitled = formatTranscriptForPrompt({ ...transcript, title: '' }, { unknownSpeaker: '?' });
   assert.doesNotMatch(untitled, /Τίτλος:/, 'χωρίς τίτλο, χωρίς γραμμή τίτλου');
+  // OO-020: μεταγραφή χωρίς ομιλητές (στη συσκευή χωρίς διαχωρισμό): χωρίς ετικέτα ομιλητή στις γραμμές.
+  const speakerless = formatTranscriptForPrompt({ ...transcript, speakers: [], segments: transcript.segments.map(s => ({ ...s, speakerId: null })) }, { unknownSpeaker: 'Άγνωστος ομιλητής' });
+  assert.match(speakerless, /\[00:00:01\] Καλημέρα, ξεκινάμε\.\n\[01:01:40\] Τέλος\./);
+  assert.doesNotMatch(speakerless, /Άγνωστος ομιλητής|Ομιλητές:/);
   assert.match(SUMMARY_SYSTEM_PROMPT, /άνω τελεία/);
   for (const t of [SUMMARY_SYSTEM_PROMPT, buildSummaryInstruction('brief'), buildSummaryInstruction('minutes'), buildSummaryInstruction('actions')]) {
     assert.doesNotMatch(t, new RegExp(`[${String.fromCharCode(0x387, 0xb7)}]`));

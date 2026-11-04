@@ -5,14 +5,23 @@
 import { PCM_SAMPLE_RATE } from '../../domain/audio/pcm.js';
 
 /**
+ * Η Cache Storage όπου το Transformers.js κρατά τα μοντέλα (και τα .wasm του
+ * ONNX Runtime). Ορίζεται ρητά εδώ, όχι από την προεπιλογή της βιβλιοθήκης, και
+ * από εδώ τη διαβάζει το BrowserModelCache για μέγεθος και διαγραφή (CA-015).
+ */
+export const WHISPER_MODEL_CACHE_NAME = 'transformers-cache';
+
+/**
  * Ρύθμιση του Transformers.js: μοντέλα μόνο από το Hugging Face, αποθήκευση
- * στην Cache Storage του browser, νήματα WASM όταν η σελίδα είναι απομονωμένη.
+ * στην Cache Storage του browser με το δικό μας όνομα, νήματα WASM όταν η
+ * σελίδα είναι απομονωμένη.
  */
 export function configureTransformers(transformers, { wasmThreads }) {
   const { env } = transformers;
   env.allowLocalModels = false;
   env.allowRemoteModels = true;
   env.useBrowserCache = true;
+  env.cacheKey = WHISPER_MODEL_CACHE_NAME;
   if (env.backends && env.backends.onnx && env.backends.onnx.wasm) env.backends.onnx.wasm.numThreads = wasmThreads;
 }
 

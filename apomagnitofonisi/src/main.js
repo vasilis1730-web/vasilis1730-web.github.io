@@ -42,6 +42,7 @@ import { BrowserFileDelivery } from './infrastructure/platform/file-delivery.js'
 import { BrowserClipboard } from './infrastructure/platform/clipboard.js';
 import { BrowserSharedFileInbox } from './infrastructure/platform/shared-file-inbox.js';
 import { BrowserModelCache } from './infrastructure/platform/model-cache.js';
+import { WHISPER_MODEL_CACHE_NAME } from './infrastructure/whisper/whisper-recognizer.js';
 import { ServiceWorkerClient } from './infrastructure/platform/service-worker-client.js';
 import { systemClock } from './infrastructure/platform/system-clock.js';
 import { createRandomIdGenerator } from './infrastructure/platform/random-ids.js';
@@ -105,7 +106,7 @@ async function main() {
   const labels = createExportLabels();
   const fileDelivery = new BrowserFileDelivery({ document, navigator, URL });
   const clipboard = new BrowserClipboard({ navigator });
-  const modelCache = new BrowserModelCache({ caches: window.caches });
+  const modelCache = new BrowserModelCache({ caches: window.caches, cacheNames: [WHISPER_MODEL_CACHE_NAME] });
   const sharedInbox = new BrowserSharedFileInbox({ caches: window.caches });
   const sessionMedia = new SessionMedia({ URL });
 

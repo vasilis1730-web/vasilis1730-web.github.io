@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   createTranscript, speakersFromKeys, setTitle, renameSpeaker, addSpeaker, assignSpeaker, editSegmentText,
   addSummary, removeSummary, speakerTalkTime, transcriptDuration, segmentIndexAt, TranscriptRuleError,
-  SPEAKER_COLOR_COUNT, TRANSCRIPT_RULES, MAX_TITLE_LENGTH, MAX_SPEAKER_LABEL_LENGTH,
+  SPEAKER_COLOR_COUNT, TRANSCRIPT_RULES, MAX_TITLE_LENGTH, MAX_SPEAKER_LABEL_LENGTH, segmentSpeakerLabel,
 } from '../../../src/domain/transcript.js';
 
 const T0 = '2026-11-04T10:00:00.000Z';
@@ -130,4 +130,24 @@ test('ομιλητές από κλειδιά μηχανής με τη σειρά
   assert.equal(speakerIdByKey.get('speaker_0'), 'S2');
   const many = speakersFromKeys(Array.from({ length: 12 }, (_, i) => ({ speakerKey: `k${i}` })), n => `${n}`);
   assert.equal(many.speakers[SPEAKER_COLOR_COUNT].colorIndex, 0, 'τα χρώματα επαναλαμβάνονται κυκλικά');
+});
+
+test('segmentSpeakerLabel: ένας κανόνας για εξαγωγές και prompt (OO-020)', () => {
+  const base = {
+    id: 'x', title: 'Τ', createdAt: '2026-11-04T09:00:00.000Z',
+    source: { fileName: 'a.mp3', mimeType: 'audio/mpeg', sizeBytes: 1, durationSec: 10 },
+    languageCode: 'el', engine: { kind: 'local', model: 'm' },
+  };
+  const none = createTranscript({ ...base, speakers: [], segments: [{ id: 's1', start: 0, end: 1, speakerId: null, text: 'α' }] });
+  assert.equal(segmentSpeakerLabel(none, none.segments[0], { unknown: '?' }), null, 'χωρίς ομιλητές: καμία ετικέτα');
+  const some = createTranscript({
+    ...base,
+    speakers: [{ id: 'A', label: 'Πρόεδρος', colorIndex: 0 }],
+    segments: [
+      { id: 's1', start: 0, end: 1, speakerId: 'A', text: 'α' },
+      { id: 's2', start: 1, end: 2, speakerId: null, text: 'β' },
+    ],
+  });
+  assert.equal(segmentSpeakerLabel(some, some.segments[0], { unknown: '?' }), 'Πρόεδρος');
+  assert.equal(segmentSpeakerLabel(some, some.segments[1], { unknown: '?' }), '?', 'τμήμα χωρίς ομιλητή σε μεταγραφή με ομιλητές');
 });

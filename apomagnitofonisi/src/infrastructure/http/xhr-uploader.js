@@ -14,7 +14,7 @@
  * @property {(loadedBytes: number, totalBytes: number) => void} [onUploadProgress]
  * @property {() => void} [onUploadComplete]  η αποστολή τελείωσε, ο server επεξεργάζεται
  */
-import { AppError, ERROR_CODES } from '../../application/errors.js';
+import { AppError, ERROR_CODES, onAbort } from '../../application/errors.js';
 
 export class XhrUploader {
   #createXhr;
@@ -33,7 +33,7 @@ export class XhrUploader {
     return new Promise((resolve, reject) => {
       if (signal && signal.aborted) { reject(new AppError(ERROR_CODES.CANCELLED, 'ακυρώθηκε')); return; }
       const xhr = this.#createXhr();
-      const onAbort = () => xhr.abort();
+      let cleanup = () => {};
       xhr.open('POST', url, true);
       for (const [name, value] of Object.entries(headers || {})) xhr.setRequestHeader(name, value);
       xhr.upload.onprogress = event => { if (event.lengthComputable) onUploadProgress?.(event.loaded, event.total); };
@@ -42,8 +42,7 @@ export class XhrUploader {
       xhr.onerror = () => { cleanup(); reject(new AppError(ERROR_CODES.NETWORK, `αποτυχία δικτύου προς ${url}`)); };
       xhr.ontimeout = xhr.onerror;
       xhr.onabort = () => { cleanup(); reject(new AppError(ERROR_CODES.CANCELLED, 'ακυρώθηκε')); };
-      const cleanup = () => signal && signal.removeEventListener('abort', onAbort);
-      if (signal) signal.addEventListener('abort', onAbort, { once: true });
+      cleanup = onAbort(signal, () => xhr.abort());
       xhr.send(body);
     });
   }

@@ -136,7 +136,10 @@ test('χωρίς τίτλο: τα έγγραφα γράφουν την ετικ�
     segments: [{ id: 'seg-1', start: 0, end: 2, speakerId: null, text: 'Δοκιμή.' }],
   }), { id: 's1', kind: 'brief', model: 'm', createdAt: '2026-11-04T10:00:00.000Z', text: 'Κείμενο.' }, '2026-11-04T10:00:00.000Z');
   assert.equal(untitled.title, '');
-  assert.match(new TxtTranscriptExporter({ labels: testLabels }).render(untitled), /^Μεταγραφή χωρίς τίτλο\r\n/);
+  const untitledText = new TxtTranscriptExporter({ labels: testLabels }).render(untitled);
+  assert.match(untitledText, /^Μεταγραφή χωρίς τίτλο\r\n/);
+  assert.match(untitledText, /\[00:00:00\] Δοκιμή\./, 'χωρίς ομιλητές: καμία ετικέτα ομιλητή (ίδιος κανόνας με το prompt, OO-020)');
+  assert.doesNotMatch(untitledText, new RegExp(testLabels.unknownSpeaker));
   assert.match(new TxtSummaryExporter({ labels: testLabels }).render(untitled, untitled.summaries[0]), /^# Περίληψη: Μεταγραφή χωρίς τίτλο/);
   const document = readZip(new DocxTranscriptExporter({ labels: testLabels }).render(untitled)).get('word/document.xml');
   assert.match(document, /<w:t xml:space="preserve">Μεταγραφή χωρίς τίτλο<\/w:t>/);

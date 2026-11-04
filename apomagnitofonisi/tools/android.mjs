@@ -16,8 +16,11 @@
  *        → versionCode=… και versionName=… (για το $GITHUB_OUTPUT), κενό N = από την ώρα UTC
  *   node tools/android.mjs inspect [--version-code N]
  *        → έλεγχος του ανυπόγραφου APK μετά το Gradle (test.yml), με N και έλεγχος του versionCode
- *   node tools/android.mjs release --keystore <αρχείο> --out <φάκελος> --version-code N
- *        → υπογραφή APK/AAB με το upload key, επαλήθευση, σύνοψη (android.yml)
+ *   node tools/android.mjs release --keystore <αρχείο> [--out <φάκελος>] --version-code N
+ *        → υπογραφή APK/AAB με το upload key, επαλήθευση, σύνοψη (android.yml).
+ *          Προεπιλογή του --out: android-release. Πριν αγγίξει τον φάκελο ελέγχει
+ *          ότι δεν περιέχει το repository ή το keystore και ότι υπάρχουν οι έξοδοι
+ *          του Gradle, και σβήνει από εκεί ΜΟΝΟ ό,τι φτιάχνει το ίδιο (API-024).
  *
  * Κάθε εντολή δέχεται μόνο τις δικές της παραμέτρους (COMMAND_FLAGS): μια
  * παράμετρος άλλης εντολής απορρίπτεται, δεν αγνοείται σιωπηλά. Το
@@ -33,7 +36,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { ROOT } from './paths.mjs';
+import { ROOT, assertSafeOutput, isSameOrInside } from './paths.mjs';
 import { ANDROID_DIR, ANDROID_APPS, readTwaManifest, gradleOutputsOf } from './android/project.mjs';
 import { ASSET_LINK_RELATIONS } from './android/asset-links.mjs';
 import { versionFor, parseVersionCode } from './android/play-version.mjs';
@@ -108,7 +111,54 @@ export const COMMAND_FLAGS = Object.freeze({
   }),
 });
 
-export const USAGE = 'χρήση: node tools/android.mjs version [--version-code N] | inspect [--version-code N] | release --keystore <αρχείο> --out <φάκελος> --version-code N';
+export const USAGE = 'χρήση: node tools/android.mjs version [--version-code N] | inspect [--version-code N] | release --keystore <αρχείο> [--out <φάκελος>] --version-code N';
+
+/** Ο φάκελος εξόδου του release όταν δεν δίνεται --out. */
+export const DEFAULT_RELEASE_OUT = 'android-release';
+
+/** Ό,τι γράφει το release στον φάκελο εξόδου, και μόνο αυτό σβήνει από εκεί (API-024). */
+const RELEASE_ARTIFACT = /^(.+\.(apk|aab)|SHA256SUMS|\.work-.+)$/;
+
+/**
+ * Ο φάκελος εξόδου του release πρέπει να είναι ασφαλής πριν γίνει οτιδήποτε:
+ * όχι η ρίζα του repository ή γονέας της, και όχι φάκελος που περιέχει το
+ * keystore (θα το έσβηνε πριν χρησιμοποιηθεί).
+ * @param {{ root: string, out: string, keystore: string }} paths
+ */
+export function assertSafeReleaseOutput({ root, out, keystore }) {
+  assertSafeOutput(root, out);
+  if (isSameOrInside(keystore, out)) {
+    throw new Error(`μη ασφαλής φάκελος εξόδου: ${out} περιέχει το keystore ${keystore}`);
+  }
+}
+
+/**
+ * Σβήνει από τον φάκελο εξόδου μόνο ό,τι φτιάχνει ένα release (*.apk, *.aab,
+ * SHA256SUMS, .work-*), όχι ολόκληρο τον φάκελο. Επιστρέφει τα ονόματα που έσβησε.
+ * @param {string} out
+ * @returns {string[]}
+ */
+export function clearReleaseArtifacts(out) {
+  if (!fs.existsSync(out)) return [];
+  const removed = [];
+  for (const name of fs.readdirSync(out).sort()) {
+    if (!RELEASE_ARTIFACT.test(name)) continue;
+    fs.rmSync(path.join(out, name), { recursive: true, force: true });
+    removed.push(name);
+  }
+  return removed;
+}
+
+/** Οι έξοδοι του Gradle που λείπουν, για όλες τις εφαρμογές (κενή λίστα = όλα στη θέση τους). */
+export function findMissingGradleOutputs(root = ROOT) {
+  const missing = [];
+  for (const app of ANDROID_APPS) {
+    for (const file of Object.values(gradleOutputsOf(app, root))) {
+      if (!fs.existsSync(file)) missing.push(`${app}: λείπει το ${path.relative(root, file)} (τρέξε πρώτα ./gradlew assembleRelease bundleRelease)`);
+    }
+  }
+  return missing;
+}
 
 /**
  * Οι παράμετροι της γραμμής εντολών, ελεγμένες ανά εντολή: άγνωστη ή ξένη
@@ -255,8 +305,10 @@ export function releaseSummary({ rows, versionCode, buildToolsDir, warnings, pro
 }
 
 async function commandRelease(args, root = ROOT) {
-  const keystore = args.keystore;
-  const out = path.resolve(args.out || 'android-release');
+  const keystore = path.resolve(args.keystore);
+  const out = path.resolve(args.out || DEFAULT_RELEASE_OUT);
+  // API-024: πρώτα ο φάκελος εξόδου, πριν από κάθε άλλο έλεγχο ή εγγραφή.
+  assertSafeReleaseOutput({ root, out, keystore });
   // Το parseArgs έχει ήδη ελέγξει ότι δόθηκαν και ότι το versionCode είναι έγκυρο.
   const versionCode = args.versionCode;
   if (!fs.existsSync(keystore) || !fs.statSync(keystore).size) throw new Error('λείπει ή είναι άδειο το keystore (--keystore)');
@@ -266,7 +318,11 @@ async function commandRelease(args, root = ROOT) {
   const env = { ...process.env, ANDROID_KEY_PASSWORD: process.env.ANDROID_KEY_PASSWORD || process.env.ANDROID_KEYSTORE_PASSWORD };
 
   const buildToolsDir = findBuildToolsDir();
-  fs.rmSync(out, { recursive: true, force: true });
+  // Οι έξοδοι του Gradle ελέγχονται πριν αγγιχτεί ο φάκελος: ένα αποτυχημένο
+  // release δεν σβήνει τα αρχεία του προηγούμενου.
+  const missing = findMissingGradleOutputs(root);
+  if (missing.length) throw new Error(`δεν υπάρχουν οι έξοδοι του Gradle:\n${missing.map(m => `  - ${m}`).join('\n')}`);
+  clearReleaseArtifacts(out);
   fs.mkdirSync(out, { recursive: true });
   const work = fs.mkdtempSync(path.join(out, '.work-'));
   const rows = [];

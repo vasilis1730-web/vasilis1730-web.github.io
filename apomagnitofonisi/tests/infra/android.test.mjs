@@ -10,7 +10,8 @@ import { MAX_VERSION_CODE, versionFor, parseVersionCode } from '../../tools/andr
 import {
   TARGET_SDK, MIN_SDK, parseBadging, parseResources, parseApksignerCerts, parseKeytoolCerts, findApkProblems, findShareTargetProblems,
 } from '../../tools/android/apk-inspection.mjs';
-import { parseArgs, releaseSummary, COMMAND_FLAGS } from '../../tools/android.mjs';
+import { parseArgs, releaseSummary, COMMAND_FLAGS, USAGE, DEFAULT_RELEASE_OUT, assertSafeReleaseOutput, clearReleaseArtifacts, findMissingGradleOutputs } from '../../tools/android.mjs';
+import { assertSafeOutput } from '../../tools/paths.mjs';
 import { read, exists, skipWhileAppPending, tempDir } from './helpers.mjs';
 
 /* Η εφαρμογή Android (Trusted Web Activity, project του Bubblewrap στο
@@ -405,6 +406,35 @@ test('κανένα κλειδί υπογραφής, APK ή AAB στο repository
   }
   assert.ok(exists(`${dir}/twa-manifest.json`));
   assert.equal(readTwaManifest(APP).signingKey.path, './android.keystore', 'μόνο placeholder, το keystore δεν είναι στο repository');
+});
+
+test('το release δεν αγγίζει επικίνδυνο φάκελο εξόδου και σβήνει μόνο ό,τι φτιάχνει (API-024)', t => {
+  const keystore = path.join(tempDir(t, 'apomagn-keystore-'), 'upload.keystore');
+  // Ο ίδιος φύλακας με το build: η ρίζα, γονέας της, «.» και «..» από τη ρίζα.
+  for (const out of [ROOT, path.resolve(ROOT, '.'), path.resolve(ROOT, '..'), path.dirname(path.dirname(ROOT)), '/']) {
+    assert.throws(() => assertSafeReleaseOutput({ root: ROOT, out, keystore }), /μη ασφαλής φάκελος εξόδου/, out);
+    assert.throws(() => assertSafeOutput(ROOT, out), /μη ασφαλής φάκελος εξόδου/, out);
+  }
+  assert.doesNotThrow(() => assertSafeReleaseOutput({ root: ROOT, out: path.join(ROOT, DEFAULT_RELEASE_OUT), keystore }));
+  const holder = path.dirname(keystore);
+  assert.throws(() => assertSafeReleaseOutput({ root: ROOT, out: holder, keystore }), /περιέχει το keystore/, 'δεν σβήνεται το keystore');
+  assert.throws(() => assertSafeReleaseOutput({ root: ROOT, out: path.dirname(holder), keystore }), /περιέχει το keystore/);
+
+  const out = tempDir(t, 'apomagn-release-');
+  for (const name of ['app-1.apk', 'app-1.aab', 'SHA256SUMS', 'σημειώσεις.txt', 'upload.keystore']) fs.writeFileSync(path.join(out, name), 'x');
+  fs.mkdirSync(path.join(out, '.work-abc'));
+  fs.writeFileSync(path.join(out, '.work-abc', 'aligned.apk'), 'x');
+  fs.mkdirSync(path.join(out, 'παλιά'));
+  assert.deepEqual(clearReleaseArtifacts(out), ['.work-abc', 'SHA256SUMS', 'app-1.aab', 'app-1.apk']);
+  assert.deepEqual(fs.readdirSync(out).sort(), ['upload.keystore', 'παλιά', 'σημειώσεις.txt'], 'ό,τι δεν φτιάχνει το release μένει');
+  assert.deepEqual(clearReleaseArtifacts(path.join(out, 'δεν-υπάρχει')), []);
+
+  const emptyRoot = tempDir(t, 'apomagn-root-');
+  const missing = findMissingGradleOutputs(emptyRoot);
+  assert.equal(missing.length, ANDROID_APPS.length * 2, 'APK και AAB για κάθε εφαρμογή, πριν αγγιχτεί ο φάκελος εξόδου');
+  assert.ok(missing.every(m => /λείπει το .*\.(apk|aab)/.test(m)));
+  assert.match(USAGE, /release --keystore <αρχείο> \[--out <φάκελος>\] --version-code N/, 'το --out είναι προαιρετικό');
+  assert.equal(DEFAULT_RELEASE_OUT, 'android-release');
 });
 
 test('η σύνοψη του release γράφει τα αρχεία, το αποτύπωμα και αν το γνωρίζουν repo, domain και Google', () => {

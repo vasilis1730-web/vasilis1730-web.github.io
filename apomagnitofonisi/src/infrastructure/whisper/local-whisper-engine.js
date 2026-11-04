@@ -11,7 +11,7 @@
  * μένει σταθερή όσο μεγάλο κι αν είναι το αρχείο. Ακύρωση = τερματισμός του
  * worker (άμεσος, και ελευθερώνει τη μνήμη του μοντέλου).
  */
-import { AppError, ERROR_CODES, isCancellation, toAppError } from '../../application/errors.js';
+import { AppError, ERROR_CODES, isCancellation, onAbort, throwIfAborted, toAppError, untilAborted } from '../../application/errors.js';
 import { PROGRESS_STAGES, clampFraction } from '../../application/progress.js';
 import { AudioWindowAssembler } from '../../domain/audio/audio-window-assembler.js';
 import { PCM_SAMPLE_RATE } from '../../domain/audio/pcm.js';
@@ -64,18 +64,24 @@ export class LocalWhisperEngine {
    * @returns {Promise<import('../../application/ports.js').RecognitionResult>}
    */
   async recognize({ media, options, signal, onProgress, onPartialSegments }) {
+    // OO-018: η ακύρωση πιάνεται σε κάθε βήμα, και πριν υπάρξει worker. Μια
+    // ακύρωση κατά την ανάγνωση των στοιχείων του αρχείου δεν αφήνει να
+    // ξεκινήσει η λήψη του μοντέλου.
+    throwIfAborted(signal);
     const caps = await this.#detectCapabilities();
     const model = selectLocalModel(options.localQuality, caps);
     if (!model) throw new AppError(ERROR_CODES.DEVICE_UNSUPPORTED, 'το επίπεδο ποιότητας θέλει WebGPU');
     onProgress?.({ stage: PROGRESS_STAGES.READING });
-    const info = await this.#mediaReader.probe(media);
+    const info = await untilAborted(this.#mediaReader.probe(media), signal);
     if (!info.hasAudio) throw new AppError(ERROR_CODES.NO_AUDIO_TRACK, 'το αρχείο δεν έχει ήχο');
+    throwIfAborted(signal);
 
     const worker = new WorkerClient(this.#createWorker());
-    const stop = () => worker.terminate();
-    signal?.addEventListener('abort', stop, { once: true });
+    const unsubscribe = onAbort(signal, () => worker.terminate());
     try {
+      throwIfAborted(signal);
       await this.#loadModels(worker, model, options, caps, onProgress);
+      throwIfAborted(signal);
       const recognized = await this.#transcribeStream(worker, media, options, info.durationSec, { signal, onProgress, onPartialSegments });
       if (options.diarize) onProgress?.({ stage: PROGRESS_STAGES.DIARIZING });
       return {
@@ -88,7 +94,7 @@ export class LocalWhisperEngine {
       if ((signal && signal.aborted) || isCancellation(error)) throw new AppError(ERROR_CODES.CANCELLED, 'ακυρώθηκε', { cause: error });
       throw toAppError(error);
     } finally {
-      signal?.removeEventListener('abort', stop);
+      unsubscribe();
       worker.terminate();
     }
   }

@@ -31,7 +31,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ROOT } from './paths.mjs';
+import { ROOT, assertSafeOutput } from './paths.mjs';
 import { assetLinksJson } from './android/asset-links.mjs';
 import { cspOf } from './headers.mjs';
 import { findPublishedSourceProblems } from './source-checks.mjs';
@@ -178,14 +178,6 @@ export function findContactProblems({ contactEmail = CONTACT_EMAIL, files = publ
     }
   }
   return problems;
-}
-
-function assertSafeOutput(root, out) {
-  const rel = path.relative(path.resolve(out), path.resolve(root));
-  // Το out δεν επιτρέπεται να είναι η ρίζα ή γονέας της: θα διαγραφόταν το repository.
-  if (rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))) {
-    throw new Error(`μη ασφαλής φάκελος εξόδου: ${out} περιέχει τη ρίζα του repository`);
-  }
 }
 
 /** Χτίζει το dist και επιστρέφει { out, siteUrl, csp, files }. */

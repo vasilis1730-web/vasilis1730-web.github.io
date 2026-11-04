@@ -11,7 +11,7 @@
  * - Για αποστολή στο cloud βγάζει μόνο τον ήχο ως Ogg Opus ένα κανάλι ~32 kbps
  *   (περίπου 14 MB ανά ώρα).
  */
-import { AppError, ERROR_CODES, throwIfAborted } from '../../application/errors.js';
+import { AppError, ERROR_CODES, onAbort, throwIfAborted } from '../../application/errors.js';
 import { StreamingResampler } from '../../domain/audio/streaming-resampler.js';
 import { downmixToMono, PCM_SAMPLE_RATE } from '../../domain/audio/pcm.js';
 const UPLOAD_BITRATE = 32_000;
@@ -106,7 +106,7 @@ export class MediabunnyMediaReader {
     const input = openInput(mb, media);
     const output = new mb.Output({ format: new mb.OggOutputFormat(), target: new mb.BufferTarget() });
     let conversion = null;
-    const cancel = () => conversion && conversion.cancel();
+    let unsubscribe = () => {};
     try {
       conversion = await mb.Conversion.init({
         input,
@@ -118,7 +118,9 @@ export class MediabunnyMediaReader {
       });
       if (!conversion.isValid) return notCompacted;
       conversion.onProgress = progress => onFraction?.(progress);
-      signal?.addEventListener('abort', cancel, { once: true });
+      const running = conversion;
+      // Ακύρωση που έγινε πριν από αυτό το σημείο πιάνεται κι αυτή (OO-018).
+      unsubscribe = onAbort(signal, () => { running.cancel(); });
       throwIfAborted(signal);
       await conversion.execute();
       return { audio: new Blob([output.target.buffer], { type: 'audio/ogg' }), compacted: true };
@@ -126,7 +128,7 @@ export class MediabunnyMediaReader {
       if ((signal && signal.aborted) || error instanceof mb.ConversionCanceledError) throw new AppError(ERROR_CODES.CANCELLED, 'ακυρώθηκε', { cause: error });
       throw toMediaError(mb, error);
     } finally {
-      signal?.removeEventListener('abort', cancel);
+      unsubscribe();
       input.dispose();
     }
   }

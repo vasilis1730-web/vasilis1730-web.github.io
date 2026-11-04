@@ -31,7 +31,9 @@
  * @typedef {Object} RecognitionRequest
  * @property {Blob} media  το αρχείο (File) του χρήστη
  * @property {RecognitionOptions} options
- * @property {AbortSignal} [signal]
+ * @property {AbortSignal} [signal]  όταν ακυρωθεί, το recognize απορρίπτει αμέσως με CANCELLED: και αν είχε ήδη
+ *   ακυρωθεί πριν από την κλήση, και ανάμεσα στα βήματα (ανάγνωση, λήψη μοντέλου, μεταγραφή), χωρίς να συνεχίσει
+ *   εργασία στο παρασκήνιο που θα έγραφε δεδομένα (OO-018)
  * @property {(update: ProgressUpdate) => void} [onProgress]
  * @property {(segments: RecognizedSegment[]) => void} [onPartialSegments]  νέα τμήματα όσο προχωρά
  *
