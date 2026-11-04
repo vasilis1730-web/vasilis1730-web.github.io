@@ -4,21 +4,33 @@
  * συσκευή, διαγραφή όλων των δεδομένων και πληροφορίες έκδοσης.
  *
  * Τα επίπεδα ποιότητας έρχονται από τη μηχανή στη συσκευή (OO-003), ώστε να
- * μη φαίνεται διαθέσιμο ένα επίπεδο που δεν τρέχει εδώ.
+ * μη φαίνεται διαθέσιμο ένα επίπεδο που δεν τρέχει εδώ. Η ρύθμιση
+ * `localQuality` αφορά μόνο αυτή τη μηχανή, γι' αυτό η προβολή τη ζητά ονομαστικά.
+ *
+ * Ενημερώσεις επί τόπου (OO-001): η επικεφαλίδα μένει ίδια, κάθε κλειδί
+ * ενημερώνει μόνο το δικό του πεδίο (KeyEditor), τα επίπεδα ποιότητας
+ * μπαίνουν στο ίδιο <select> όταν έρθουν. Μόνο μετά τη «Διαγραφή όλων των
+ * δεδομένων» ξαναγράφονται όλες οι ενότητες, γιατί άλλαξαν όλες.
+ *
+ * Οι διαγραφές περνούν από το DataErasureService (και τα μοντέλα), που πρώτα
+ * σταματά μια μεταγραφή που τρέχει (OO-014, CA-013).
  */
-import { h, replaceContent, field } from '../dom.js';
-import { STRINGS, qualityLabel } from '../strings.js';
-import { runAction, describeError } from '../feedback.js';
+import { h, field } from '../dom.js';
+import { STRINGS } from '../strings.js';
+import { runAction, reportUnexpected } from '../feedback.js';
 import { formatBytes, formatPrice } from '../formatters.js';
 import { confirmAction } from '../components/confirm-dialog.js';
-import { KEY_PROVIDERS } from '../../application/api-key-service.js';
+import { KeyEditor } from '../components/key-editor.js';
+import { qualityOptions } from '../components/quality-options.js';
+import { KEY_PROVIDERS, KEY_RETENTIONS } from '../../application/key-providers.js';
+import { ERASE_TARGETS } from '../../application/erase-targets.js';
 import { ENGINE_KINDS } from '../../domain/transcript.js';
-import { CLAUDE_MODELS, DEFAULT_CLAUDE_MODEL_ID, AUTO_LOCAL_QUALITY } from '../../config/models.js';
+import { CLAUDE_MODELS, DEFAULT_CLAUDE_MODEL_ID } from '../../config/models.js';
 import { EXTERNAL_LINKS } from '../../config/external-links.js';
 
 const KEY_EDITORS = Object.freeze([
-  { provider: KEY_PROVIDERS.ELEVENLABS, label: STRINGS.settings.elevenLabsKey, help: STRINGS.settings.elevenLabsHelp, keysUrl: EXTERNAL_LINKS.elevenLabsKeys, pricingUrl: EXTERNAL_LINKS.elevenLabsPricing },
-  { provider: KEY_PROVIDERS.ANTHROPIC, label: STRINGS.settings.anthropicKey, help: STRINGS.settings.anthropicHelp, keysUrl: EXTERNAL_LINKS.anthropicKeys, pricingUrl: EXTERNAL_LINKS.anthropicPricing },
+  { provider: KEY_PROVIDERS.ELEVENLABS, texts: { label: STRINGS.settings.elevenLabsKey, help: STRINGS.settings.elevenLabsHelp, keysUrl: EXTERNAL_LINKS.elevenLabsKeys, pricingUrl: EXTERNAL_LINKS.elevenLabsPricing } },
+  { provider: KEY_PROVIDERS.ANTHROPIC, texts: { label: STRINGS.settings.anthropicKey, help: STRINGS.settings.anthropicHelp, keysUrl: EXTERNAL_LINKS.anthropicKeys, pricingUrl: EXTERNAL_LINKS.anthropicPricing } },
 ]);
 
 export class SettingsView {
@@ -26,16 +38,20 @@ export class SettingsView {
   navKey = 'settings';
 
   #deps;
-  #root = null;
-  #qualityPresets = null;
+  #heading = null;
+  #content = null;
+  #qualityDescription = null;
+  #qualitySelect = null;
+  #modelsSize = null;
+  #sizeRequest = 0;
 
   /**
    * @param {Object} deps
-   * @param {import('../../application/api-key-service.js').ApiKeyService} deps.apiKeys
+   * @param {Pick<import('../../application/api-key-service.js').ApiKeyService, 'getKeyHint'|'saveKey'|'removeKey'|'verify'|'getKeyRetention'|'setKeyRetention'>} deps.apiKeys
    * @param {import('../../application/settings-service.js').SettingsService} deps.settings
    * @param {Pick<import('../../application/transcription-service.js').TranscriptionService, 'describeQualityPresets'>} deps.transcription
-   * @param {import('../../application/ports.js').ModelCache} deps.modelCache
-   * @param {import('../../application/data-erasure-service.js').DataErasureService} deps.dataErasure
+   * @param {Pick<import('../../application/ports.js').ModelCache, 'estimateSizeBytes'>} deps.modelCache
+   * @param {Pick<import('../../application/data-erasure-service.js').DataErasureService, 'erase'|'eraseAll'>} deps.dataErasure
    * @param {import('../components/toast.js').ToastHost} deps.toasts
    * @param {{ version: string, privacyHref: string }} deps.about
    */
@@ -44,30 +60,33 @@ export class SettingsView {
   }
 
   render() {
-    this.#root = h('section', { class: 'view settings-view' });
-    this.#draw();
-    this.#deps.transcription.describeQualityPresets(ENGINE_KINDS.LOCAL).then(presets => {
-      this.#qualityPresets = presets;
-      if (this.#root.isConnected) this.#draw();
-    }, () => {});
-    return this.#root;
+    this.#heading = h('h1', {}, STRINGS.settings.title);
+    this.#content = h('div');
+    const root = h('section', { class: 'view settings-view' }, this.#heading, this.#content);
+    this.#drawSections();
+    this.#deps.transcription.describeQualityPresets(ENGINE_KINDS.LOCAL).then(description => {
+      this.#qualityDescription = description;
+      this.#refreshQuality();
+    }, reportUnexpected);
+    return root;
   }
 
-  #draw() {
+  /* ---------------------------------------------------------------- ενότητες */
+
+  #drawSections() {
     const s = STRINGS.settings;
-    replaceContent(this.#root,
-      h('h1', {}, s.title),
+    this.#content.replaceChildren(
       h('section', { class: 'card', 'aria-labelledby': 'keys-title' },
         h('h2', { id: 'keys-title' }, s.keysTitle),
         h('p', { class: 'hint' }, s.keysIntro),
-        KEY_EDITORS.map(editor => this.#keyEditor(editor)),
+        KEY_EDITORS.map(({ provider, texts }) => new KeyEditor({ apiKeys: this.#deps.apiKeys, toasts: this.#deps.toasts, provider, texts }).element()),
         this.#keyRetentionToggle()),
       h('section', { class: 'card', 'aria-labelledby': 'model-title' },
         h('h2', { id: 'model-title' }, s.claudeModel),
         this.#claudeModels()),
       h('section', { class: 'card', 'aria-labelledby': 'local-title' },
         h('h2', { id: 'local-title' }, s.localQuality),
-        this.#qualitySelect(),
+        this.#qualityField(),
         this.#modelsBlock()),
       h('section', { class: 'card', 'aria-labelledby': 'text-title' },
         h('h2', { id: 'text-title' }, s.textTitle),
@@ -81,49 +100,13 @@ export class SettingsView {
         h('p', {}, STRINGS.footer.independent, ' ', h('a', { href: this.#deps.about.privacyHref }, STRINGS.footer.privacy))));
   }
 
-  #keyEditor({ provider, label, help, keysUrl, pricingUrl }) {
-    const { apiKeys, toasts } = this.#deps;
-    const s = STRINGS.settings;
-    const hint = apiKeys.keyHint(provider);
-    const input = h('input', { type: 'password', autocomplete: 'off', spellcheck: false, placeholder: s.keyPlaceholder, inputMode: 'text' });
-    const status = h('p', { class: 'meta', 'aria-live': 'polite' }, hint ? `${s.keyStored} …${hint}` : '');
-    const toggle = h('button', { type: 'button', class: 'secondary', onclick: () => {
-      const showing = input.type === 'text';
-      input.type = showing ? 'password' : 'text';
-      toggle.textContent = showing ? s.show : s.hide;
-    } }, s.show);
-    const save = h('button', { type: 'button', class: 'primary', onclick: async () => {
-      const saved = await runAction(toasts, () => { apiKeys.saveKey(provider, input.value); return true; }, { success: s.keySaved });
-      if (saved) { input.value = ''; this.#draw(); }
-    } }, STRINGS.common.save);
-    const verify = h('button', { type: 'button', class: 'secondary', disabled: !hint, onclick: async () => {
-      verify.disabled = true;
-      status.textContent = s.verifying;
-      try {
-        await apiKeys.verify(provider);
-        status.textContent = s.keyValid;
-      } catch (error) {
-        status.textContent = describeError(error);
-      } finally {
-        verify.disabled = false;
-      }
-    } }, s.verify);
-    const remove = hint ? h('button', { type: 'button', class: 'danger', onclick: async () => {
-      await runAction(toasts, () => apiKeys.removeKey(provider), { success: s.keyRemoved });
-      this.#draw();
-    } }, s.remove) : null;
-    return h('div', { class: 'key-editor' },
-      field(label, input, help),
-      h('p', { class: 'links' },
-        h('a', { href: keysUrl, target: '_blank', rel: 'noopener noreferrer' }, s.getKey), ' ',
-        h('a', { href: pricingUrl, target: '_blank', rel: 'noopener noreferrer' }, s.pricing)),
-      h('div', { class: 'actions' }, toggle, save, verify, remove),
-      status);
-  }
-
   #keyRetentionToggle() {
-    const { apiKeys } = this.#deps;
-    const box = h('input', { type: 'checkbox', checked: apiKeys.keyRetention() === 'device', onchange: () => apiKeys.setKeyRetention(box.checked ? 'device' : 'session') });
+    const { apiKeys, toasts } = this.#deps;
+    const onDevice = () => apiKeys.getKeyRetention() === KEY_RETENTIONS.DEVICE;
+    const box = h('input', { type: 'checkbox', checked: onDevice(), onchange: async () => {
+      const outcome = await runAction(toasts, () => apiKeys.setKeyRetention(box.checked ? KEY_RETENTIONS.DEVICE : KEY_RETENTIONS.SESSION));
+      if (!outcome.ok) box.checked = onDevice();
+    } });
     return h('div', { class: 'field' },
       h('label', { class: 'choice' }, box, h('span', {}, STRINGS.settings.keyRetentionDevice)),
       h('p', { class: 'hint' }, STRINGS.settings.keyRetentionHint));
@@ -139,29 +122,35 @@ export class SettingsView {
           h('span', { class: 'hint' }, `${formatPrice(model.inputUsdPerMTok)} / ${formatPrice(model.outputUsdPerMTok)} ${STRINGS.settings.perMillion}`)))));
   }
 
-  #qualitySelect() {
+  #qualityField() {
     const { settings } = this.#deps;
-    const selected = settings.current.localQualityPreset;
-    const presets = this.#qualityPresets ? this.#qualityPresets.presets : [];
-    const select = h('select', { onchange: () => settings.update({ localQualityPreset: select.value }) },
-      h('option', { value: AUTO_LOCAL_QUALITY, selected: selected === AUTO_LOCAL_QUALITY }, qualityLabel(AUTO_LOCAL_QUALITY)),
-      presets.map(p => h('option', { value: p.id, selected: selected === p.id, disabled: !p.available },
-        p.available ? qualityLabel(p.id) : `${qualityLabel(p.id)} (${STRINGS.quality.unavailable})`)));
-    return field(STRINGS.home.quality, select);
+    this.#qualitySelect = h('select', { onchange: () => settings.update({ localQuality: this.#qualitySelect.value }) });
+    this.#refreshQuality();
+    return field(STRINGS.home.quality, this.#qualitySelect);
+  }
+
+  /** Τα επίπεδα ποιότητας στο ίδιο <select> (πριν έρθουν, μόνο το «Αυτόματα»). */
+  #refreshQuality() {
+    this.#qualitySelect.replaceChildren(...qualityOptions(this.#qualityDescription));
+    this.#qualitySelect.value = this.#deps.settings.current.localQuality;
   }
 
   #modelsBlock() {
-    const { modelCache, toasts } = this.#deps;
-    const size = h('span', {}, STRINGS.common.loading);
-    modelCache.estimateSizeBytes().then(bytes => { size.textContent = bytes == null ? STRINGS.common.notAvailable : formatBytes(bytes); }, () => {
-      size.textContent = STRINGS.common.notAvailable;
-    });
+    this.#modelsSize = h('span', {});
+    this.#refreshModelsSize();
     return h('div', { class: 'field' },
-      h('p', {}, `${STRINGS.settings.modelsSize}: `, size),
-      h('button', { type: 'button', class: 'secondary', onclick: async () => {
-        await runAction(toasts, () => modelCache.clear(), { success: STRINGS.settings.modelsDeleted });
-        this.#draw();
-      } }, STRINGS.settings.deleteModels));
+      h('p', {}, `${STRINGS.settings.modelsSize}: `, this.#modelsSize),
+      h('button', { type: 'button', class: 'secondary', onclick: () => this.#deleteModels() }, STRINGS.settings.deleteModels));
+  }
+
+  #refreshModelsSize() {
+    const request = ++this.#sizeRequest;
+    const size = this.#modelsSize;
+    size.textContent = STRINGS.common.loading;
+    const show = text => { if (request === this.#sizeRequest) size.textContent = text; };
+    this.#deps.modelCache.estimateSizeBytes().then(
+      bytes => show(bytes == null ? STRINGS.common.notAvailable : formatBytes(bytes)),
+      () => show(STRINGS.common.notAvailable));
   }
 
   #anoTeleiaToggle() {
@@ -172,10 +161,21 @@ export class SettingsView {
       h('p', { class: 'hint' }, STRINGS.settings.noAnoTeleiaHint));
   }
 
+  /* ---------------------------------------------------------------- διαγραφές */
+
+  async #deleteModels() {
+    const s = STRINGS.settings;
+    if (!(await confirmAction({ message: s.deleteModelsConfirm, confirmLabel: s.deleteModels, danger: true }))) return;
+    await runAction(this.#deps.toasts, () => this.#deps.dataErasure.erase([ERASE_TARGETS.MODELS]), { success: s.modelsDeleted });
+    this.#refreshModelsSize();
+  }
+
   async #eraseAll() {
     const s = STRINGS.settings;
     if (!(await confirmAction({ message: s.deleteEverythingConfirm, confirmLabel: s.deleteEverything, danger: true }))) return;
     await runAction(this.#deps.toasts, () => this.#deps.dataErasure.eraseAll(), { success: s.everythingDeleted });
-    this.#draw();
+    // Άλλαξαν όλα (κλειδιά, ρυθμίσεις, μοντέλα): οι ενότητες ξαναγράφονται, η επικεφαλίδα μένει.
+    this.#drawSections();
+    this.#heading.focus({ preventScroll: true });
   }
 }

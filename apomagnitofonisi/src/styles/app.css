@@ -84,6 +84,9 @@
 
 *, *::before, *::after { box-sizing: border-box; }
 
+/* Το `hidden` κρύβει πάντα, ακόμη και στοιχεία με δικό τους display (κουμπιά, .segment, .field). */
+[hidden] { display: none !important; }
+
 html { -webkit-text-size-adjust: 100%; }
 
 body {

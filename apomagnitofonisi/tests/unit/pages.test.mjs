@@ -2,14 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { ROOT } from '../../tools/paths.mjs';
 import { APP_VERSION, CONTACT_EMAIL } from '../../src/config/app-info.js';
 import { SHARE_INBOX_CACHE, SHARED_FILE_NAME_HEADER } from '../../src/infrastructure/platform/shared-file-inbox.js';
 import { SKIP_WAITING_MESSAGE } from '../../src/infrastructure/platform/service-worker-client.js';
 import { STRINGS } from '../../src/ui/strings.js';
 import { ERROR_CODES } from '../../src/application/errors.js';
 
-const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const read = file => fs.readFileSync(path.join(ROOT, file), 'utf8');
 
 function walk(dir) {

@@ -5,17 +5,20 @@
  * - MediaPlayer: αναπαραγωγή (φτιάχνεται μία φορά, δεν σταματά στις διορθώσεις),
  * - SpeakersPanel: ονόματα, χρώματα, χρόνος ομιλίας,
  * - SegmentList: τμήματα, διόρθωση κειμένου, αναζήτηση, τρέχον τμήμα.
- * Η προβολή εφαρμόζει κάθε διόρθωση μέσω του TranscriptEditor και ενημερώνει
- * μόνο τα μέρη που αφορά.
+ *
+ * Κάθε διόρθωση γίνεται με ΜΙΑ κλήση του TranscriptEditor (μία αποθήκευση) και
+ * η νέα έκδοση περνά από το #commit, που τη δίνει σε όλα τα μέρη (OO-016).
+ * Κάθε μέρος τη συγκρίνει με την προηγούμενη και αλλάζει μόνο ό,τι άλλαξε,
+ * άρα μια νέα διόρθωση δεν χρειάζεται να ξέρει ποια μέρη αφορά.
  */
-import { h, replaceContent, field } from '../dom.js';
+import { h, field } from '../dom.js';
 import { STRINGS, errorMessage } from '../strings.js';
 import { runAction } from '../feedback.js';
 import { formatDateTime, formatDuration } from '../formatters.js';
 import { describeEngine, displayTitle } from '../presentation.js';
 import { ROUTES, hrefFor } from '../routes.js';
-import { transcriptDuration } from '../../domain/transcript.js';
-import { promptText, pickSpeaker, NEW_SPEAKER } from '../components/confirm-dialog.js';
+import { transcriptDuration, MAX_TITLE_LENGTH, MAX_SPEAKER_LABEL_LENGTH } from '../../domain/transcript.js';
+import { promptText, pickSpeaker, SPEAKER_CHOICES } from '../components/confirm-dialog.js';
 import { ExportToolbar } from '../components/export-toolbar.js';
 import { MediaPlayer } from '../components/media-player.js';
 import { SpeakersPanel } from '../components/speakers-panel.js';
@@ -38,7 +41,7 @@ export class TranscriptView {
 
   /**
    * @param {Object} deps
-   * @param {import('../../application/library-service.js').LibraryService} deps.library
+   * @param {Pick<import('../../application/library-service.js').LibraryService, 'open'>} deps.library
    * @param {import('../../application/transcript-editor.js').TranscriptEditor} deps.editor
    * @param {import('../../application/export-service.js').ExportService} deps.exports
    * @param {import('../../application/ports.js').FileDelivery} deps.fileDelivery
@@ -63,9 +66,13 @@ export class TranscriptView {
   /** @param {import('../app-shell.js').ViewContext} context */
   render(context) {
     this.#context = context;
-    this.#root = h('section', { class: 'view transcript-view' }, h('h1', {}, STRINGS.common.loading));
+    // Η επικεφαλίδα μένει η ίδια όταν έρθει η μεταγραφή: αλλάζει μόνο το κείμενό της,
+    // άρα η εστίαση που της δίνει το AppShell δεν χάνεται (OO-001).
+    this.#heading = h('h1', {}, STRINGS.common.loading);
+    this.#root = h('section', { class: 'view transcript-view' }, this.#heading);
     this.#deps.library.open(this.#id).then(transcript => this.#show(transcript), error => {
-      replaceContent(this.#root, h('h1', {}, STRINGS.transcript.notFound), h('p', {}, errorMessage(error)), h('a', { href: hrefFor(ROUTES.history()) }, STRINGS.nav.history));
+      this.#heading.textContent = STRINGS.transcript.notFound;
+      this.#root.append(h('p', {}, errorMessage(error)), h('a', { href: hrefFor(ROUTES.history()) }, STRINGS.nav.history));
     });
     return this.#root;
   }
@@ -77,85 +84,70 @@ export class TranscriptView {
   /* ---------------------------------------------------------------- σχεδίαση */
 
   #show(transcript) {
-    this.#transcript = transcript;
-    this.#heading = h('h1', {});
-    this.#titleInput = h('input', { type: 'text', maxLength: 200, autocomplete: 'off' });
+    this.#titleInput = h('input', { type: 'text', maxLength: MAX_TITLE_LENGTH, autocomplete: 'off' });
     this.#titleInput.addEventListener('change', () => this.#setTitle(this.#titleInput.value));
-    replaceContent(this.#root,
-      this.#heading,
+    this.#root.append(
       h('p', { class: 'meta' }, formatDateTime(transcript.createdAt), `, ${formatDuration(transcriptDuration(transcript))}, ${describeEngine(transcript.engine)}`),
       this.#toolbar.element(),
       field(STRINGS.transcript.titleLabel, this.#titleInput),
       this.#player.element(),
       this.#speakers.element(),
       transcript.segments.length ? this.#segments.element() : h('p', { class: 'notice' }, STRINGS.transcript.empty));
-    this.#segments.setTranscript(transcript);
-    this.#refreshTitle();
-    this.#speakers.update(transcript);
+    this.#commit(transcript);
   }
 
-  #refreshTitle() {
-    const title = displayTitle(this.#transcript);
+  /** Η μία διαδρομή κάθε νέας έκδοσης της μεταγραφής: όλα τα μέρη, το καθένα αλλάζει μόνο ό,τι άλλαξε. */
+  #commit(transcript) {
+    this.#transcript = transcript;
+    const title = displayTitle(transcript);
     this.#heading.textContent = title;
-    if (document.activeElement !== this.#titleInput) this.#titleInput.value = this.#transcript.title;
-    this.title = title;
-    this.#context?.refreshTitle();
-    this.#toolbar.setTranscript(this.#transcript);
+    if (document.activeElement !== this.#titleInput) this.#titleInput.value = transcript.title;
+    if (this.title !== title) {
+      this.title = title;
+      this.#context?.refreshTitle();
+    }
+    this.#toolbar.setTranscript(transcript);
+    this.#speakers.setTranscript(transcript);
+    this.#segments.setTranscript(transcript);
   }
 
   /* ---------------------------------------------------------------- διορθώσεις */
 
-  /** Εφαρμόζει μια διόρθωση. Επιστρέφει true όταν αποθηκεύτηκε. */
-  async #apply(change) {
-    const updated = await runAction(this.#deps.toasts, () => change(this.#transcript));
-    if (!updated) return false;
-    this.#transcript = updated;
-    this.#toolbar.setTranscript(updated);
-    return true;
+  /** Εφαρμόζει μια διόρθωση και, αν αποθηκεύτηκε, τη δίνει σε όλα τα μέρη. Επιστρέφει αν αποθηκεύτηκε. */
+  async #edit(change) {
+    const outcome = await runAction(this.#deps.toasts, () => change(this.#transcript));
+    if (outcome.ok) this.#commit(outcome.value);
+    return outcome.ok;
   }
 
   async #setTitle(title) {
-    await this.#apply(t => this.#deps.editor.setTitle(t, title));
+    await this.#edit(t => this.#deps.editor.setTitle(t, title));
+    // Ο τίτλος όπως αποθηκεύτηκε (π.χ. χωρίς τα κενά στην άκρη), ή ο παλιός αν δεν αποθηκεύτηκε.
     this.#titleInput.value = this.#transcript.title;
-    this.#refreshTitle();
   }
 
   async #renameSpeaker(speakerId, label) {
-    if (await this.#apply(t => this.#deps.editor.renameSpeaker(t, speakerId, label))) {
-      this.#speakers.update(this.#transcript);
-      this.#segments.updateSpeakers(this.#transcript);
-    } else {
-      this.#speakers.restore(speakerId);
-    }
+    if (!(await this.#edit(t => this.#deps.editor.renameSpeaker(t, speakerId, label)))) this.#speakers.restore(speakerId);
   }
 
   async #editText(segmentId, text) {
-    await this.#apply(t => this.#deps.editor.editSegmentText(t, segmentId, text));
-    this.#segments.updateSegment(this.#transcript, segmentId);
+    if (!(await this.#edit(t => this.#deps.editor.editSegmentText(t, segmentId, text)))) this.#segments.restore(segmentId);
   }
 
   async #chooseSpeaker(segmentId) {
     const segment = this.#transcript.segments.find(s => s.id === segmentId);
     if (!segment) return;
     const options = [...this.#transcript.speakers.map(s => ({ id: s.id, label: s.label })), { id: null, label: STRINGS.transcript.noSpeaker }];
-    const chosen = await pickSpeaker({ options, currentId: segment.speakerId });
-    if (chosen === undefined) return;
-    if (chosen === NEW_SPEAKER) { await this.#addSpeaker(segmentId); return; }
-    if (await this.#apply(t => this.#deps.editor.assignSpeaker(t, segmentId, chosen))) {
-      this.#segments.updateSegment(this.#transcript, segmentId);
-      this.#speakers.update(this.#transcript);
-    }
+    const choice = await pickSpeaker({ options, currentId: segment.speakerId });
+    if (choice.kind === SPEAKER_CHOICES.NEW) await this.#addSpeaker(segmentId);
+    else if (choice.kind === SPEAKER_CHOICES.ASSIGN) await this.#edit(t => this.#deps.editor.assignSpeaker(t, segmentId, choice.speakerId));
   }
 
+  /** Νέος ομιλητής, και αν δοθεί τμήμα, ανάθεση σε αυτό με την ίδια αποθήκευση (OO-013). */
   async #addSpeaker(segmentId = null) {
-    const name = await promptText({ label: STRINGS.transcript.newSpeakerName });
+    const name = await promptText({ label: STRINGS.transcript.newSpeakerName, maxLength: MAX_SPEAKER_LABEL_LENGTH });
     if (!name) return;
-    const added = await this.#apply(async t => {
-      const { transcript, speakerId } = await this.#deps.editor.addSpeaker(t, name);
-      return segmentId ? this.#deps.editor.assignSpeaker(transcript, segmentId, speakerId) : transcript;
-    });
-    if (!added) return;
-    this.#speakers.update(this.#transcript);
-    if (segmentId) this.#segments.updateSegment(this.#transcript, segmentId);
+    const { editor } = this.#deps;
+    await this.#edit(async t => (segmentId ? await editor.addSpeakerToSegment(t, segmentId, name) : await editor.addSpeaker(t, name)).transcript);
   }
 }

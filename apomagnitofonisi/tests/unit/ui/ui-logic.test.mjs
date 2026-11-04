@@ -6,8 +6,8 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { STRINGS, errorMessage, exportFormatLabel, qualityLabel, speakerLabelFor } from '../../../src/ui/strings.js';
-import { describeError, runAction } from '../../../src/ui/feedback.js';
+import { STRINGS, errorMessage, messageForCode, exportFormatLabel, qualityLabel, speakerLabelFor } from '../../../src/ui/strings.js';
+import { describeError, reportUnexpected, runAction } from '../../../src/ui/feedback.js';
 import { createExportLabels, describeEngine, displayTitle, engineShortName, summaryFileSuffixFor } from '../../../src/ui/presentation.js';
 import { ROUTE_PATTERNS, ROUTES, hrefFor } from '../../../src/ui/routes.js';
 import { HashRouter } from '../../../src/ui/router.js';
@@ -27,6 +27,15 @@ test('κάθε κωδικός σφάλματος και κάθε αιτία λα
   assert.equal(errorMessage(new AppError(ERROR_CODES.INVALID_INPUT)), STRINGS.errors[ERROR_CODES.INVALID_INPUT]);
   assert.equal(errorMessage(new TypeError('x')), STRINGS.errors[ERROR_CODES.UNKNOWN], 'λάθος του κώδικα: γενικό μήνυμα');
   assert.equal(errorMessage(null), STRINGS.errors[ERROR_CODES.UNKNOWN]);
+  assert.equal(errorMessage(new DOMException('x', 'AbortError')), STRINGS.errors[ERROR_CODES.UNKNOWN], 'αριθμητικός code του DOMException');
+});
+
+test('μήνυμα ανά κωδικό: χωρίς ψεύτικο αντικείμενο σφάλματος (API-020)', () => {
+  assert.equal(messageForCode(ERROR_CODES.KEY_MISSING), STRINGS.errors[ERROR_CODES.KEY_MISSING]);
+  assert.equal(messageForCode(ERROR_CODES.INVALID_INPUT, INPUT_ISSUES.EMPTY_KEY), STRINGS.inputIssues[INPUT_ISSUES.EMPTY_KEY]);
+  assert.equal(messageForCode(ERROR_CODES.INVALID_INPUT, 'άγνωστη αιτία'), STRINGS.errors[ERROR_CODES.INVALID_INPUT]);
+  assert.equal(messageForCode('providerSaid'), STRINGS.errors[ERROR_CODES.UNKNOWN], 'μόνο κωδικοί του ERROR_CODES');
+  assert.equal(messageForCode(undefined), STRINGS.errors[ERROR_CODES.UNKNOWN]);
 });
 
 test('κάθε μηχανή, μορφή, είδος περίληψης, επίπεδο ποιότητας και στόχος διαγραφής έχει ονομασία', () => {
@@ -65,24 +74,47 @@ test('μήνυμα σφάλματος: μήνυμα του παρόχου και
   assert.match(describeError(incomplete), new RegExp(`${STRINGS.errors.notErased}: μεταγραφές, μοντέλα\\.$`));
 });
 
-test('ενέργειες: μήνυμα επιτυχίας, μήνυμα σφάλματος, σιωπή στην ακύρωση', async () => {
-  const shown = [];
-  const toasts = { show: (message, options) => shown.push([message, options.tone]) };
-  assert.equal(await runAction(toasts, () => 42, { success: 'Έγινε.' }), 42);
-  assert.equal(await runAction(toasts, async () => { throw invalidInput(INPUT_ISSUES.EMPTY_KEY); }), undefined);
-  assert.equal(await runAction(toasts, async () => { throw new AppError(ERROR_CODES.CANCELLED); }), undefined);
-  assert.equal(await runAction(toasts, () => { throw new DOMException('x', 'AbortError'); }), undefined);
-  assert.deepEqual(shown, [['Έγινε.', 'success'], [STRINGS.inputIssues[INPUT_ISSUES.EMPTY_KEY], 'error']]);
+/** Τα console.error όσο τρέχει το `run`. */
+async function captureConsoleErrors(run) {
   const logged = [];
   const original = console.error;
   console.error = error => logged.push(error);
   try {
-    await runAction(toasts, () => { throw new TypeError('bug'); });
+    await run();
   } finally {
     console.error = original;
   }
+  return logged;
+}
+
+test('ενέργειες: ρητό αποτέλεσμα, μήνυμα επιτυχίας, μήνυμα σφάλματος, σιωπή στην ακύρωση (API-021)', async () => {
+  const shown = [];
+  const toasts = { show: (message, options) => shown.push([message, options.tone]) };
+  assert.deepEqual(await runAction(toasts, () => 42, { success: 'Έγινε.' }), { ok: true, value: 42 });
+  assert.deepEqual(await runAction(toasts, () => {}), { ok: true, value: undefined }, 'ενέργεια χωρίς τιμή: επιτυχία, όχι αποτυχία');
+  assert.deepEqual(await runAction(toasts, async () => { throw invalidInput(INPUT_ISSUES.EMPTY_KEY); }), { ok: false });
+  assert.deepEqual(await runAction(toasts, async () => { throw new AppError(ERROR_CODES.CANCELLED); }), { ok: false });
+  assert.deepEqual(await runAction(toasts, () => { throw new DOMException('x', 'AbortError'); }), { ok: false });
+  assert.deepEqual(shown, [['Έγινε.', 'success'], [STRINGS.inputIssues[INPUT_ISSUES.EMPTY_KEY], 'error']]);
+  const logged = await captureConsoleErrors(() => runAction(toasts, () => { throw new TypeError('bug'); }));
   assert.equal(logged.length, 1, 'τα λάθη του κώδικα φαίνονται και στην κονσόλα');
   assert.deepEqual(shown.at(-1), [STRINGS.errors.UNKNOWN, 'error']);
+});
+
+test('απρόσμενα σφάλματα στην κονσόλα με την αρχική αιτία, τα γνωστά όχι (API-020)', async () => {
+  const bug = new TypeError('x is not a function');
+  const wrapped = new AppError(ERROR_CODES.UNKNOWN, bug.message, { cause: bug });
+  const logged = await captureConsoleErrors(() => {
+    assert.equal(reportUnexpected(wrapped), true, 'UNKNOWN από adapter');
+    assert.equal(reportUnexpected(new RangeError('άγνωστο μοντέλο')), true, 'λάθος του κώδικα');
+    assert.equal(reportUnexpected(new AppError(ERROR_CODES.KEY_INVALID)), false, 'γνωστό σφάλμα');
+    assert.equal(reportUnexpected(new AppError(ERROR_CODES.CANCELLED)), false, 'ακύρωση');
+    assert.equal(reportUnexpected(new DOMException('x', 'AbortError')), false, 'ακύρωση του browser');
+  });
+  assert.equal(logged.length, 2);
+  assert.equal(logged[0], bug, 'η αιτία, όχι το περιτύλιγμα');
+  const viaAction = await captureConsoleErrors(() => runAction({ show() {} }, () => { throw wrapped; }));
+  assert.deepEqual(viaAction, [bug], 'και μέσα από το runAction');
 });
 
 test('παρουσίαση: ονόματα μηχανών, τίτλος χωρίς τίτλο, ετικέτες εγγράφων', () => {
@@ -120,6 +152,40 @@ test('διαδρομές: κάθε σύνδεσμος βρίσκει τη δια
     ['HOME', {}], ['PROGRESS', {}], ['TRANSCRIPT', { id: 'abc-1' }], ['SUMMARY', { id: 'abc-1' }], ['HISTORY', {}], ['SETTINGS', {}], ['fallback'],
   ]);
   assert.equal(hrefFor(ROUTES.transcript('a/b')), '#/t/a%2Fb', 'το αναγνωριστικό κωδικοποιείται');
+});
+
+test('διαδρομές: κάθε αναγνωριστικό αποκωδικοποιείται μία φορά, το χαλασμένο hash πάει στην εναλλακτική (API-017)', () => {
+  const location = { hash: '' };
+  const window = { location, addEventListener() {} };
+  const shown = [];
+  const router = new HashRouter({
+    window,
+    fallback: () => shown.push(['fallback']),
+    routes: [
+      { pattern: ROUTE_PATTERNS.TRANSCRIPT, show: params => shown.push(['TRANSCRIPT', params.id]) },
+      { pattern: ROUTE_PATTERNS.SUMMARY, show: params => shown.push(['SUMMARY', params.id]) },
+    ],
+  });
+  for (const id of ['50%', '%41', 'a b', 'ά/β', 'Σύσκεψη #3?']) {
+    shown.length = 0;
+    const path = ROUTES.transcript(id);
+    location.hash = hrefFor(path);
+    router.navigate(path);
+    assert.deepEqual(shown, [['TRANSCRIPT', id]], id);
+    assert.equal(router.currentPath, path, `ίδια μορφή με τα ROUTES: ${id}`);
+    shown.length = 0;
+    location.hash = hrefFor(ROUTES.summary(id));
+    router.navigate(ROUTES.summary(id));
+    assert.deepEqual(shown, [['SUMMARY', id]], id);
+  }
+  for (const broken of ['#/t/%', '#/t/%E0%A4%A', '#/t/abc%zz/summary']) {
+    shown.length = 0;
+    location.hash = broken;
+    assert.doesNotThrow(() => router.start(), broken);
+    assert.deepEqual(shown, [['fallback']], broken);
+  }
+  location.hash = '';
+  assert.equal(router.currentPath, '/', 'χωρίς hash: η αρχική');
 });
 
 test('κοινή χρήση: το αρχείο παραλαμβάνεται μία φορά και το ?shared=1 φεύγει από τη διεύθυνση', async () => {

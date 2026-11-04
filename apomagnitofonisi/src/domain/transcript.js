@@ -80,6 +80,9 @@ export const SPEAKER_COLOR_COUNT = 10;
 /** Το μέγιστο μήκος τίτλου: ο κανόνας του μοντέλου, που τον δείχνει και η διεπαφή (CA-009). */
 export const MAX_TITLE_LENGTH = 200;
 
+/** Το μέγιστο μήκος ονόματος ομιλητή, όπως ο τίτλος: κανόνας του μοντέλου, που τον δείχνει και η διεπαφή. */
+export const MAX_SPEAKER_LABEL_LENGTH = 80;
+
 /**
  * Οι κανόνες του μοντέλου που μπορεί να παραβιαστούν. Μόνο το EMPTY_SPEAKER_NAME
  * οφείλεται στον χρήστη, τα υπόλοιπα είναι λάθη του κώδικα που καλεί.
@@ -307,11 +310,11 @@ function requireSpeaker(transcript, speakerId) {
   if (!transcript.speakers.some(s => s.id === speakerId)) throw new TranscriptRuleError(`άγνωστος ομιλητής ${speakerId}`, TRANSCRIPT_RULES.UNKNOWN_SPEAKER);
 }
 
-/** Όνομα ομιλητή με ένα κενό ανάμεσα στις λέξεις. Κενό όνομα δεν επιτρέπεται. */
+/** Όνομα ομιλητή με ένα κενό ανάμεσα στις λέξεις, έως MAX_SPEAKER_LABEL_LENGTH. Κενό όνομα δεν επιτρέπεται. */
 function cleanLabel(label) {
   const clean = String(label ?? '').replace(/\s+/g, ' ').trim();
   if (!clean) throw new TranscriptRuleError('το όνομα ομιλητή δεν μπορεί να είναι κενό', TRANSCRIPT_RULES.EMPTY_SPEAKER_NAME);
-  return clean;
+  return clean.slice(0, MAX_SPEAKER_LABEL_LENGTH).trim();
 }
 
 function requireText(value, name) {

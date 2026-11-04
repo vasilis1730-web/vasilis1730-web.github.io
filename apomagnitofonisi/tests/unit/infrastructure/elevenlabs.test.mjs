@@ -82,7 +82,7 @@ test('μεταγραφή: πεδία του αιτήματος, πρόοδος �
   assert.deepEqual(stages, [['uploading', 0], ['uploading', 0.5], ['transcribing', undefined]]);
   assert.deepEqual(result.segments.map(s => [s.speakerKey, s.text]), [['speaker_0', 'Καλημέρα σας. [γέλια]'], ['speaker_1', 'Καλημέρα.']]);
   assert.equal(result.languageCode, 'el');
-  assert.equal(result.model, 'scribe_v2');
+  assert.equal(result.modelId, 'scribe_v2');
 });
 
 test('αυτόματη γλώσσα και χωρίς ομιλητές: χωρίς language_code/num_speakers, χωρίς κλειδιά ομιλητή', async () => {

@@ -1,22 +1,26 @@
 /**
- * Προβολή «Περίληψη και πρακτικά»: είδος, μοντέλο, εκτίμηση κόστους, σύνταξη
- * με ροή κειμένου (Claude), διακοπή, και οι αποθηκευμένες περιλήψεις με
- * εξαγωγή, αντιγραφή και διαγραφή.
+ * Προβολή «Περίληψη και πρακτικά»: η φόρμα του αιτήματος (είδος, οδηγία,
+ * μοντέλο, εκτίμηση κόστους), η σύνταξη με ροή κειμένου και η διακοπή της.
+ * Οι αποθηκευμένες περιλήψεις είναι δικό τους μέρος (SavedSummariesList, OO-015).
  *
- * Η φόρμα, η γραμμή κατάστασης και το κείμενο που γράφεται φτιάχνονται μία
- * φορά και ενημερώνονται επί τόπου (OO-001): η ένδειξη «ξαναγράφεται από
- * εφεδρικό μοντέλο» φαίνεται όσο γράφεται και μένει και μετά το τέλος.
+ * Το αν μπορεί να γραφτεί περίληψη (π.χ. αν υπάρχει κλειδί) το λέει η
+ * υπηρεσία περιλήψεων (checkAvailability): η προβολή δεν ξέρει πάροχο ή κλειδί.
+ *
+ * Η επικεφαλίδα, η φόρμα, η γραμμή κατάστασης και το κείμενο που γράφεται
+ * φτιάχνονται μία φορά και ενημερώνονται επί τόπου (OO-001): η ένδειξη
+ * «ξαναγράφεται από εφεδρικό μοντέλο» φαίνεται όσο γράφεται και μένει και μετά
+ * το τέλος. Το κουμπί «Σύνταξη» γίνεται «Διακοπή» χωρίς να αντικατασταθεί.
  */
-import { h, replaceContent, field } from '../dom.js';
-import { STRINGS, errorMessage, exportFormatLabel } from '../strings.js';
-import { runAction, describeError } from '../feedback.js';
-import { formatDateTime, formatUsd } from '../formatters.js';
+import { h, field } from '../dom.js';
+import { STRINGS, errorMessage, messageForCode } from '../strings.js';
+import { describeError, reportUnexpected } from '../feedback.js';
+import { formatUsd } from '../formatters.js';
 import { displayTitle } from '../presentation.js';
 import { ROUTES, hrefFor } from '../routes.js';
 import { renderMarkdown } from '../components/markdown-view.js';
-import { confirmAction } from '../components/confirm-dialog.js';
+import { SavedSummariesList } from '../components/saved-summaries-list.js';
 import { SUMMARY_KINDS } from '../../domain/transcript.js';
-import { KEY_PROVIDERS } from '../../application/api-key-service.js';
+import { ERROR_CODES, isCancellation } from '../../application/errors.js';
 import { CLAUDE_MODELS, findClaudeModel } from '../../config/models.js';
 
 export class SummaryView {
@@ -25,31 +29,33 @@ export class SummaryView {
   #deps;
   #id;
   #transcript = null;
-  #root = null;
+  #availability = null;
   #kind = SUMMARY_KINDS.MINUTES;
   #customInstruction = '';
   #controller = null;
   #streamed = '';
   #renderPending = false;
   #status = null;
+  #saved;
   // Στοιχεία που φτιάχνονται μία φορά:
+  #root = null;
+  #heading = null;
   #customField = null;
   #controls = [];
   #costNode = null;
-  #actionNode = null;
+  #notice = null;
+  #actionButton = null;
   #statusNode = null;
   #output = null;
   #outputCard = null;
-  #saved = null;
 
   /**
    * @param {Object} deps
-   * @param {import('../../application/library-service.js').LibraryService} deps.library
-   * @param {import('../../application/summary-service.js').SummaryService} deps.summaries
-   * @param {import('../../application/transcript-editor.js').TranscriptEditor} deps.editor
-   * @param {import('../../application/export-service.js').ExportService} deps.exports
+   * @param {Pick<import('../../application/library-service.js').LibraryService, 'open'>} deps.library
+   * @param {Pick<import('../../application/summary-service.js').SummaryService, 'checkAvailability'|'estimateCost'|'summarize'>} deps.summaries
    * @param {import('../../application/settings-service.js').SettingsService} deps.settings
-   * @param {import('../../application/api-key-service.js').ApiKeyService} deps.apiKeys
+   * @param {Pick<import('../../application/transcript-editor.js').TranscriptEditor, 'removeSummary'>} deps.editor
+   * @param {Pick<import('../../application/export-service.js').ExportService, 'summaryFormats'|'exportSummary'>} deps.exports
    * @param {import('../../application/ports.js').FileDelivery} deps.fileDelivery
    * @param {import('../../application/ports.js').Clipboard} deps.clipboard
    * @param {import('../components/toast.js').ToastHost} deps.toasts
@@ -58,12 +64,26 @@ export class SummaryView {
   constructor(deps, { id }) {
     this.#deps = deps;
     this.#id = id;
+    this.#saved = new SavedSummariesList({
+      editor: deps.editor,
+      exports: deps.exports,
+      fileDelivery: deps.fileDelivery,
+      clipboard: deps.clipboard,
+      toasts: deps.toasts,
+      onChange: transcript => { this.#transcript = transcript; },
+    });
   }
 
   render() {
-    this.#root = h('section', { class: 'view summary-view' }, h('h1', {}, STRINGS.summary.title));
-    this.#deps.library.open(this.#id).then(t => { this.#transcript = t; this.#build(); }, error => {
-      replaceContent(this.#root, h('h1', {}, STRINGS.transcript.notFound), h('p', {}, errorMessage(error)));
+    this.#heading = h('h1', {}, STRINGS.summary.title);
+    this.#root = h('section', { class: 'view summary-view' }, this.#heading);
+    this.#deps.library.open(this.#id).then(transcript => this.#build(transcript), error => {
+      this.#heading.textContent = STRINGS.transcript.notFound;
+      this.#root.append(h('p', {}, errorMessage(error)));
+    });
+    this.#deps.summaries.checkAvailability().then(availability => this.#setAvailability(availability), error => {
+      reportUnexpected(error);
+      this.#setAvailability({ available: false, reason: ERROR_CODES.UNKNOWN });
     });
     return this.#root;
   }
@@ -74,16 +94,20 @@ export class SummaryView {
 
   /* ---------------------------------------------------------------- σχεδίαση */
 
-  #build() {
-    this.#saved = h('div');
-    replaceContent(this.#root,
-      h('h1', {}, STRINGS.summary.title),
-      h('p', { class: 'meta' }, h('a', { href: hrefFor(ROUTES.transcript(this.#id)) }, `${STRINGS.summary.backToTranscript}: ${displayTitle(this.#transcript)}`)),
+  #build(transcript) {
+    this.#transcript = transcript;
+    this.#root.append(
+      h('p', { class: 'meta' }, h('a', { href: hrefFor(ROUTES.transcript(this.#id)) }, `${STRINGS.summary.backToTranscript}: ${displayTitle(transcript)}`)),
       this.#form(),
       this.#outputSection(),
-      this.#saved);
+      this.#saved.element());
+    this.#saved.setTranscript(transcript);
     this.#refreshForm();
-    this.#refreshSaved();
+  }
+
+  #setAvailability(availability) {
+    this.#availability = availability;
+    if (this.#transcript) this.#refreshForm();
   }
 
   #form() {
@@ -102,11 +126,18 @@ export class SummaryView {
       CLAUDE_MODELS.map(m => h('option', { value: m.id, selected: settings.current.claudeModelId === m.id }, m.label)));
     this.#controls.push(model);
     this.#costNode = h('p', { class: 'meta', 'aria-live': 'polite' });
-    this.#actionNode = h('div', { class: 'actions' });
-    const form = h('form', { class: 'card options' }, kinds, this.#customField, field(STRINGS.summary.model, model), this.#costNode, this.#actionNode);
+    this.#notice = h('p', { class: 'warning', hidden: true });
+    // Ένα κουμπί για «Σύνταξη» και «Διακοπή»: όσο γράφεται, το κλικ σταματά τη σύνταξη.
+    this.#actionButton = h('button', { type: 'submit', class: 'primary', disabled: true, onclick: event => {
+      if (!this.#controller) return;
+      event.preventDefault();
+      this.#controller.abort();
+    } }, STRINGS.summary.generate);
+    const form = h('form', { class: 'card options' }, kinds, this.#customField, field(STRINGS.summary.model, model), this.#costNode,
+      h('div', { class: 'actions' }, this.#notice, this.#actionButton));
     form.addEventListener('submit', event => {
       event.preventDefault();
-      if (this.#hasKey() && !this.#controller) this.#generate();
+      if (this.#canGenerate()) this.#generate();
     });
     return form;
   }
@@ -118,18 +149,33 @@ export class SummaryView {
     return this.#outputCard;
   }
 
-  /** Κατάσταση της φόρμας: πεδίο οδηγίας, απενεργοποίηση όσο γράφεται, κουμπί, κόστος. */
+  #canGenerate() {
+    return Boolean(this.#transcript && this.#availability && this.#availability.available && !this.#controller);
+  }
+
+  /** Κατάσταση της φόρμας: πεδίο οδηγίας, απενεργοποίηση όσο γράφεται, ειδοποίηση, κουμπί, κόστος. */
   #refreshForm() {
     const running = Boolean(this.#controller);
     this.#customField.hidden = this.#kind !== SUMMARY_KINDS.CUSTOM;
     for (const control of this.#controls) control.disabled = running;
-    const hasKey = this.#hasKey();
-    replaceContent(this.#actionNode,
-      !hasKey ? h('p', { class: 'warning' }, STRINGS.summary.noKey, ' ', h('a', { href: hrefFor(ROUTES.settings()) }, STRINGS.home.goToSettings)) : null,
-      running
-        ? h('button', { type: 'button', class: 'danger', onclick: () => this.#controller?.abort() }, STRINGS.summary.stop)
-        : h('button', { type: 'submit', class: 'primary', disabled: !hasKey }, STRINGS.summary.generate));
+    this.#saved.setBusy(running);
+    this.#refreshNotice();
+    this.#actionButton.className = running ? 'danger' : 'primary';
+    this.#actionButton.textContent = running ? STRINGS.summary.stop : STRINGS.summary.generate;
+    this.#actionButton.disabled = !running && !this.#canGenerate();
     this.#refreshCost();
+  }
+
+  /** Γιατί δεν γράφεται περίληψη (π.χ. λείπει κλειδί), με σύνδεσμο στις Ρυθμίσεις όπου βοηθά. */
+  #refreshNotice() {
+    const availability = this.#availability;
+    const blocked = Boolean(availability && !availability.available);
+    this.#notice.hidden = !blocked;
+    if (!blocked) return;
+    const missingKey = availability.reason === ERROR_CODES.KEY_MISSING;
+    this.#notice.replaceChildren(
+      missingKey ? STRINGS.summary.noKey : messageForCode(availability.reason),
+      ...(missingKey ? [' ', h('a', { href: hrefFor(ROUTES.settings()) }, STRINGS.home.goToSettings)] : []));
   }
 
   #refreshCost() {
@@ -160,27 +206,7 @@ export class SummaryView {
     });
   }
 
-  #refreshSaved() {
-    const t = this.#transcript;
-    if (!t.summaries.length) { replaceContent(this.#saved, h('p', { class: 'hint' }, STRINGS.summary.none)); return; }
-    replaceContent(this.#saved, h('section', { class: 'saved-summaries', 'aria-labelledby': 'saved-title' },
-      h('h2', { id: 'saved-title' }, STRINGS.summary.saved),
-      t.summaries.map(summary => h('details', { class: 'card saved-summary' },
-        h('summary', {}, `${STRINGS.summary.kinds[summary.kind]}, ${formatDateTime(summary.createdAt)}`),
-        h('div', { class: 'markdown' }, renderMarkdown(summary.text)),
-        summary.truncated ? h('p', { class: 'warning' }, STRINGS.summary.truncated) : null,
-        h('p', { class: 'hint' }, STRINGS.summary.notice),
-        h('div', { class: 'actions' },
-          this.#deps.exports.summaryFormats.map(format => h('button', { type: 'button', class: 'secondary', onclick: () => this.#download(summary, format) }, exportFormatLabel(format))),
-          h('button', { type: 'button', class: 'secondary', onclick: () => this.#copy(summary.text) }, STRINGS.common.copy),
-          h('button', { type: 'button', class: 'danger', onclick: () => this.#remove(summary.id) }, STRINGS.common.delete))))));
-  }
-
-  /* ---------------------------------------------------------------- ενέργειες */
-
-  #hasKey() {
-    return this.#deps.apiKeys.hasKey(KEY_PROVIDERS.ANTHROPIC);
-  }
+  /* ---------------------------------------------------------------- σύνταξη */
 
   async #generate() {
     this.#controller = new AbortController();
@@ -200,9 +226,15 @@ export class SummaryView {
       this.#transcript = outcome.transcript;
       this.#streamed = outcome.summary.text;
       this.#status = finalStatus(outcome);
-      this.#refreshSaved();
+      this.#saved.setTranscript(outcome.transcript);
     } catch (error) {
-      this.#status = { tone: 'error', text: describeError(error) };
+      // Η «Διακοπή» του χρήστη δεν είναι σφάλμα (OO-007).
+      if (isCancellation(error)) {
+        this.#status = { tone: 'hint', text: STRINGS.summary.stopped };
+      } else {
+        reportUnexpected(error);
+        this.#status = { tone: 'error', text: describeError(error) };
+      }
     } finally {
       this.#controller = null;
       if (this.#root && this.#root.isConnected) {
@@ -210,22 +242,6 @@ export class SummaryView {
         this.#refreshOutput();
       }
     }
-  }
-
-  #download(summary, format) {
-    return runAction(this.#deps.toasts, () => this.#deps.fileDelivery.download(this.#deps.exports.exportSummary(this.#transcript, summary, format)));
-  }
-
-  #copy(text) {
-    return runAction(this.#deps.toasts, () => this.#deps.clipboard.copyText(text), { success: STRINGS.common.copied });
-  }
-
-  async #remove(summaryId) {
-    if (!(await confirmAction({ message: STRINGS.summary.deleteConfirm, confirmLabel: STRINGS.common.delete, danger: true }))) return;
-    const updated = await runAction(this.#deps.toasts, () => this.#deps.editor.removeSummary(this.#transcript, summaryId));
-    if (!updated) return;
-    this.#transcript = updated;
-    this.#refreshSaved();
   }
 }
 

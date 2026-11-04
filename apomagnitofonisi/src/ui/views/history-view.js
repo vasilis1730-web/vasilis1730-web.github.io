@@ -1,6 +1,10 @@
 /**
  * Προβολή «Ιστορικό»: οι μεταγραφές της συσκευής, άνοιγμα, διαγραφή,
  * διαγραφή όλων, εισαγωγή αρχείου .json και ο χώρος που χρησιμοποιείται.
+ *
+ * Η επικεφαλίδα φτιάχνεται μία φορά στο render (OO-001): όταν έρθει ή
+ * αλλάξει η λίστα αλλάζει μόνο το περιεχόμενο κάτω από αυτήν, άρα η εστίαση
+ * που της δίνει το AppShell μένει. Μετά από διαγραφή η εστίαση γυρίζει σε αυτήν.
  */
 import { h, replaceContent } from '../dom.js';
 import { STRINGS, historyCounts, errorMessage } from '../strings.js';
@@ -15,7 +19,8 @@ export class HistoryView {
   navKey = 'history';
 
   #deps;
-  #root = null;
+  #heading = null;
+  #content = null;
 
   /**
    * @param {Object} deps
@@ -28,9 +33,11 @@ export class HistoryView {
   }
 
   render() {
-    this.#root = h('section', { class: 'view history-view' }, h('h1', {}, STRINGS.history.title));
+    this.#heading = h('h1', {}, STRINGS.history.title);
+    this.#content = h('div');
+    const root = h('section', { class: 'view history-view' }, this.#heading, this.#content);
     this.#refresh();
-    return this.#root;
+    return root;
   }
 
   async #refresh() {
@@ -40,11 +47,10 @@ export class HistoryView {
     try {
       [items, usage] = await Promise.all([library.listNewestFirst(), library.estimateStorageUsage()]);
     } catch (error) {
-      replaceContent(this.#root, h('h1', {}, STRINGS.history.title), h('p', { class: 'error' }, errorMessage(error)));
+      replaceContent(this.#content, h('p', { class: 'error' }, errorMessage(error)));
       return;
     }
-    replaceContent(this.#root,
-      h('h1', {}, STRINGS.history.title),
+    replaceContent(this.#content,
       h('p', { class: 'meta' }, `${STRINGS.history.storage}: ${formatBytes(usage.usageBytes)}`),
       this.#toolbar(items.length),
       items.length ? h('ul', { class: 'history-list' }, items.map(item => this.#item(item))) : h('p', { class: 'notice' }, STRINGS.history.empty));
@@ -56,10 +62,11 @@ export class HistoryView {
     input.addEventListener('change', async () => {
       const file = input.files && input.files[0];
       if (!file) return;
-      const transcript = await runAction(toasts, async () => library.importFromJson(await file.text()));
+      const outcome = await runAction(toasts, async () => library.importFromJson(await file.text()));
       input.value = '';
-      if (!transcript) return;
-      toasts.show(STRINGS.history.imported, { tone: 'success', action: { label: STRINGS.common.open, run: () => router.navigate(ROUTES.transcript(transcript.id)) } });
+      if (!outcome.ok) return;
+      const { id } = outcome.value;
+      toasts.show(STRINGS.history.imported, { tone: 'success', action: { label: STRINGS.common.open, run: () => router.navigate(ROUTES.transcript(id)) } });
       this.#refresh();
     });
     return h('div', { class: 'toolbar' },
@@ -82,12 +89,18 @@ export class HistoryView {
   async #remove(item) {
     if (!(await confirmAction({ message: STRINGS.history.deleteConfirm, confirmLabel: STRINGS.common.delete, danger: true }))) return;
     await runAction(this.#deps.toasts, () => this.#deps.library.remove(item.id), { success: STRINGS.history.deleted });
-    this.#refresh();
+    await this.#refreshAndFocus();
   }
 
   async #clear() {
     if (!(await confirmAction({ message: STRINGS.history.deleteAllConfirm, confirmLabel: STRINGS.history.deleteAll, danger: true }))) return;
     await runAction(this.#deps.toasts, () => this.#deps.library.clear(), { success: STRINGS.history.allDeleted });
-    this.#refresh();
+    await this.#refreshAndFocus();
+  }
+
+  /** Το κουμπί που πατήθηκε δεν υπάρχει πια: η εστίαση πηγαίνει στην επικεφαλίδα. */
+  async #refreshAndFocus() {
+    await this.#refresh();
+    this.#heading.focus({ preventScroll: true });
   }
 }

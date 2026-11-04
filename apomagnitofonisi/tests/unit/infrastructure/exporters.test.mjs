@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createZip, crc32 } from '../../../src/infrastructure/export/zip-store-writer.js';
-import { buildDocx, escapeXml } from '../../../src/infrastructure/export/docx-document.js';
+import { escapeXml } from '../../../src/infrastructure/export/docx-document.js';
 import { TxtTranscriptExporter, SrtTranscriptExporter, VttTranscriptExporter, JsonTranscriptExporter, TxtSummaryExporter } from '../../../src/infrastructure/export/text-exporters.js';
 import { DocxTranscriptExporter, DocxSummaryExporter, markdownToDocxBlocks } from '../../../src/infrastructure/export/docx-exporters.js';
 import { createTranscript, addSummary } from '../../../src/domain/transcript.js';

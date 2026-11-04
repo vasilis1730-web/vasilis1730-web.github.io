@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   createTranscript, speakersFromKeys, setTitle, renameSpeaker, addSpeaker, assignSpeaker, editSegmentText,
   addSummary, removeSummary, speakerTalkTime, transcriptDuration, segmentIndexAt, TranscriptRuleError,
-  SPEAKER_COLOR_COUNT, TRANSCRIPT_RULES,
+  SPEAKER_COLOR_COUNT, TRANSCRIPT_RULES, MAX_TITLE_LENGTH, MAX_SPEAKER_LABEL_LENGTH,
 } from '../../../src/domain/transcript.js';
 
 const T0 = '2026-11-04T10:00:00.000Z';
@@ -67,6 +67,14 @@ test('κενό όνομα ομιλητή, άγνωστος ομιλητής ή �
   assert.throws(() => renameSpeaker(t, 'S1', '   ', T1), TranscriptRuleError);
   assert.throws(() => assignSpeaker(t, 'seg-1', 'S7', T1), TranscriptRuleError);
   assert.throws(() => editSegmentText(t, 'nope', 'x', T1), TranscriptRuleError);
+});
+
+test('όρια μήκους: τίτλος και όνομα ομιλητή κόβονται στο όριο του μοντέλου', () => {
+  const long = 'α'.repeat(500);
+  assert.equal(setTitle(sample(), long, T1).title.length, MAX_TITLE_LENGTH);
+  assert.equal(renameSpeaker(sample(), 'S1', long, T1).speakers[0].label.length, MAX_SPEAKER_LABEL_LENGTH);
+  const { transcript, speakerId } = addSpeaker(sample(), `${'β'.repeat(MAX_SPEAKER_LABEL_LENGTH - 1)} γ`, T1);
+  assert.equal(transcript.speakers.find(s => s.id === speakerId).label, 'β'.repeat(MAX_SPEAKER_LABEL_LENGTH - 1), 'χωρίς κενό στο τέλος μετά το κόψιμο');
 });
 
 test('νέος ομιλητής με μοναδικό αναγνωριστικό', () => {

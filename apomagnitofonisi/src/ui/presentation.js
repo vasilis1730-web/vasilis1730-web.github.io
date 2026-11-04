@@ -1,6 +1,8 @@
 /**
  * Κείμενα παρουσίασης που χρειάζονται και έξω από τις προβολές (εξαγωγείς,
  * υπηρεσίες): περιγραφή μηχανής και οι ετικέτες των εγγράφων (θύρα ExportLabels).
+ *
+ * @typedef {import('../domain/transcript.js').SummaryKind} SummaryKind
  */
 import { STRINGS } from './strings.js';
 import { formatDateTime } from './formatters.js';
@@ -36,11 +38,22 @@ export function createExportLabels() {
     summaryNotice: STRINGS.summary.notice,
     formatDate: formatDateTime,
     describeEngine,
-    summaryTitleFor: kind => STRINGS.summary.kinds[kind] || STRINGS.summary.title,
+    summaryTitleFor,
   });
 }
 
-/** Η κατάληξη του ονόματος αρχείου μιας περίληψης, π.χ. 'minutes' → «Πρακτικά». */
+/**
+ * Ο τίτλος του εγγράφου μιας περίληψης, π.χ. 'minutes' → «Πρακτικά συνεδρίασης».
+ * @param {SummaryKind} kind
+ */
+function summaryTitleFor(kind) {
+  return STRINGS.summary.kinds[kind] || STRINGS.summary.title;
+}
+
+/**
+ * Η κατάληξη του ονόματος αρχείου μιας περίληψης, π.χ. 'minutes' → «Πρακτικά».
+ * @param {SummaryKind} kind
+ */
 export function summaryFileSuffixFor(kind) {
   return STRINGS.summary.fileSuffix[kind] || STRINGS.summary.fileSuffix.custom;
 }

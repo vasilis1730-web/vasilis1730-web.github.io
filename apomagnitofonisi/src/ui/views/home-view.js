@@ -2,21 +2,30 @@
  * Προβολή «Νέα μεταγραφή»: επιλογή αρχείου (ή σύρσιμο, ή κοινή χρήση από
  * άλλη εφαρμογή), μηχανή, γλώσσα, ομιλητές, ποιότητα και έναρξη.
  *
- * Το αν μια μηχανή είναι διαθέσιμη και ποια επίπεδα ποιότητας τρέχουν σε αυτή
- * τη συσκευή τα λέει η υπηρεσία μεταγραφής (OO-003): η προβολή δεν ξέρει τους
- * κανόνες των μηχανών (κλειδιά, WebGPU), μόνο δείχνει την απάντηση.
+ * Το αν μια μηχανή είναι διαθέσιμη και ποια επίπεδα ποιότητας έχει σε αυτή τη
+ * συσκευή τα λέει η υπηρεσία μεταγραφής (OO-003). Η προβολή δεν ξέρει κανόνες
+ * μηχανών: κάθε αλλαγή επιλογής περνά από το #onOptionsChanged, που ρωτά την
+ * υπηρεσία για την επιλεγμένη μηχανή με όλες τις επιλογές, και το πεδίο
+ * ποιότητας φαίνεται μόνο όταν η μηχανή έχει επίπεδα (OO-017, CA-008).
+ *
+ * Η κάρτα του αρχείου και η φόρμα φτιάχνονται ΜΙΑ φορά (OO-001): οι αλλαγές
+ * ενημερώνουν μόνο ό,τι εξαρτάται από αυτές (ομιλητές, ποιότητα, ειδοποίηση,
+ * κουμπί «Έναρξη»), ώστε η εστίαση να μένει εκεί που είναι, π.χ. όταν ο
+ * χρήστης αλλάζει μηχανή με τα βελάκια.
  */
 import { h, field, replaceContent } from '../dom.js';
-import { STRINGS, downloadSizeHint, errorMessage, qualityLabel } from '../strings.js';
+import { STRINGS, errorMessage, messageForCode } from '../strings.js';
+import { reportUnexpected } from '../feedback.js';
 import { formatBytes, formatDuration } from '../formatters.js';
+import { displayTitle } from '../presentation.js';
 import { ROUTES, hrefFor } from '../routes.js';
 import { JOB_STATUSES } from '../transcription-job.js';
+import { qualityOptions } from '../components/quality-options.js';
 import { ERROR_CODES } from '../../application/errors.js';
 import { LANGUAGES, AUTO_LANGUAGE_CODE } from '../../config/languages.js';
-import { AUTO_LOCAL_QUALITY } from '../../config/models.js';
-import { ENGINE_KINDS } from '../../domain/transcript.js';
 
 const ACCEPTED_FILES = 'audio/*,video/*,.mp3,.m4a,.mp4,.wav,.ogg,.oga,.opus,.webm,.flac,.aac,.mov,.mkv,.3gp,.amr,.wma';
+/** Πόσες επιλογές έχει ο «Αριθμός ομιλητών» (οι συσκέψεις σπάνια έχουν περισσότερους). */
 const MAX_SPEAKER_CHOICE = 10;
 
 export class HomeView {
@@ -27,12 +36,21 @@ export class HomeView {
   #file = null;
   #fileInfo = null;
   #fileError = null;
-  #qualityPresets = null;
   #availability = null;
+  #availabilityEngine = null;
   #availabilityRequest = 0;
+  /** @type {Map<string, Promise<import('../../application/ports.js').QualityPresetsDescription|null>>} */
+  #qualityByEngine = new Map();
+  #renderedQuality = undefined;
+  #jobRunning = false;
+  #unsubscribe = null;
+  // Στοιχεία που φτιάχνονται μία φορά:
   #root = null;
-  #intro = null;
+  #heading = null;
+  #jobNotice = null;
   #details = null;
+  #fileCard = null;
+  #form = null;
 
   /**
    * @param {Object} deps
@@ -51,47 +69,40 @@ export class HomeView {
   }
 
   render() {
-    // Η ζώνη επιλογής αρχείου φτιάχνεται μία φορά: έτσι μια ανανέωση της
-    // προβολής (π.χ. όταν έρθουν τα επίπεδα ποιότητας) δεν αντικαθιστά ποτέ
-    // το <input type="file"> τη στιγμή που ο χρήστης διαλέγει αρχείο.
-    this.#intro = h('div');
+    this.#heading = h('h1', {}, STRINGS.home.title);
+    this.#jobNotice = h('div', { class: 'notice', hidden: true }, STRINGS.home.jobRunning, ' ', h('a', { href: hrefFor(ROUTES.progress()) }, STRINGS.home.showJob));
     this.#details = h('div');
-    this.#root = h('section', { class: 'view home-view' }, h('h1', {}, STRINGS.home.title), this.#intro, this.#dropZone(), this.#details);
-    this.#draw();
-    this.#deps.transcription.describeQualityPresets(ENGINE_KINDS.LOCAL).then(presets => { this.#qualityPresets = presets; this.#draw(); }, () => {});
-    this.#refreshAvailability();
+    // Η ζώνη επιλογής αρχείου φτιάχνεται μία φορά: καμία ενημέρωση δεν
+    // αντικαθιστά το <input type="file"> τη στιγμή που ο χρήστης διαλέγει αρχείο.
+    this.#root = h('section', { class: 'view home-view' },
+      this.#heading,
+      this.#jobNotice,
+      this.#deps.settings.current.onboardingDismissed ? null : this.#onboarding(),
+      this.#dropZone(),
+      this.#details);
+    this.#unsubscribe = this.#deps.job.subscribe(() => this.#onJobChanged());
+    if (this.#file) this.#showFile();
     return this.#root;
   }
 
-  #draw() {
-    if (!this.#root) return;
-    const { job } = this.#deps;
-    replaceContent(this.#intro,
-      job.isRunning ? h('div', { class: 'notice' }, STRINGS.home.jobRunning, ' ', h('a', { href: hrefFor(ROUTES.progress()) }, STRINGS.home.showJob)) : null,
-      this.#deps.settings.current.onboardingDismissed ? null : this.#onboarding());
-    replaceContent(this.#details,
-      this.#file ? this.#fileCard() : null,
-      this.#file ? this.#optionsForm() : null);
+  dispose() {
+    this.#unsubscribe?.();
   }
 
-  /** Ρωτά την υπηρεσία αν η επιλεγμένη μηχανή μπορεί να τρέξει με τις τρέχουσες επιλογές. */
-  #refreshAvailability() {
-    const request = ++this.#availabilityRequest;
-    const { engineKind } = this.#deps.settings.current;
-    this.#deps.transcription.checkAvailability(engineKind, this.#recognitionOptions()).then(availability => {
-      if (request !== this.#availabilityRequest) return;
-      this.#availability = availability;
-      this.#draw();
-    }, () => {});
-  }
+  /* ---------------------------------------------------------------- σκελετός */
 
   #onboarding() {
     const s = STRINGS.onboarding;
-    return h('aside', { class: 'card onboarding', 'aria-labelledby': 'onboarding-title' },
+    const card = h('aside', { class: 'card onboarding', 'aria-labelledby': 'onboarding-title' },
       h('h2', { id: 'onboarding-title' }, s.title),
       h('p', {}, s.intro),
       h('ul', {}, h('li', {}, s.local), h('li', {}, s.cloud), h('li', {}, s.summary), h('li', {}, s.keys)),
-      h('button', { type: 'button', class: 'secondary', onclick: () => { this.#deps.settings.update({ onboardingDismissed: true }); this.#draw(); } }, s.dismiss));
+      h('button', { type: 'button', class: 'secondary', onclick: () => {
+        this.#deps.settings.update({ onboardingDismissed: true });
+        card.remove();
+        this.#heading.focus({ preventScroll: true });
+      } }, s.dismiss));
+    return card;
   }
 
   #dropZone() {
@@ -113,103 +124,217 @@ export class HomeView {
     return zone;
   }
 
-  #fileCard() {
-    const info = this.#fileInfo;
-    return h('div', { class: 'card file-card', 'aria-live': 'polite' },
-      h('h2', {}, STRINGS.home.fileInfo),
-      h('p', { class: 'file-name' }, this.#file.name),
-      h('p', { class: 'meta' }, formatBytes(this.#file.size), info && info.durationSec != null ? `, ${formatDuration(info.durationSec)}` : ''),
-      !info && !this.#fileError ? h('p', { class: 'hint' }, STRINGS.home.probing) : null,
-      info && !info.hasAudio ? h('p', { class: 'error' }, STRINGS.home.noAudio) : null,
-      this.#fileError ? h('p', { class: 'warning' }, errorMessage(this.#fileError)) : null);
+  /** Η κάρτα του αρχείου και η φόρμα: φτιάχνονται με το πρώτο αρχείο, μετά μόνο ενημερώνονται. */
+  #showFile() {
+    if (!this.#form) {
+      this.#fileCard = this.#buildFileCard();
+      this.#form = this.#buildForm();
+      this.#details.replaceChildren(this.#fileCard.root, this.#form.root);
+      this.#onOptionsChanged(null);
+    }
+    this.#refreshFileCard();
+    this.#refreshStart();
   }
 
-  #optionsForm() {
+  #buildFileCard() {
+    const card = {
+      name: h('p', { class: 'file-name' }),
+      meta: h('p', { class: 'meta' }),
+      probing: h('p', { class: 'hint' }, STRINGS.home.probing),
+      noAudio: h('p', { class: 'error', hidden: true }, STRINGS.home.noAudio),
+      problem: h('p', { class: 'warning', hidden: true }),
+    };
+    card.root = h('div', { class: 'card file-card', 'aria-live': 'polite' },
+      h('h2', {}, STRINGS.home.fileInfo), card.name, card.meta, card.probing, card.noAudio, card.problem);
+    return card;
+  }
+
+  #buildForm() {
     const { settings, transcription } = this.#deps;
     const current = settings.current;
-    const engine = current.engineKind;
-    const form = h('form', { class: 'card options', novalidate: true });
+    const form = { engines: new Map() };
 
-    form.append(h('fieldset', {},
+    form.availability = h('p', { class: 'warning', hidden: true });
+    const engines = h('fieldset', {},
       h('legend', {}, STRINGS.home.engine),
-      transcription.engineKinds.map(kind => this.#engineChoice(kind, engine)),
-      this.#availabilityNotice()));
+      transcription.engineKinds.map(kind => {
+        const texts = STRINGS.engines[kind] || { label: kind, hint: '' };
+        const radio = h('input', { type: 'radio', name: 'engine', value: kind, checked: current.engineKind === kind, onchange: () => this.#onOptionsChanged({ engineKind: kind }) });
+        form.engines.set(kind, radio);
+        return h('label', { class: 'choice' }, radio, h('span', {}, h('strong', {}, texts.label), h('span', { class: 'hint' }, texts.hint)));
+      }),
+      form.availability);
 
-    const language = h('select', { onchange: () => settings.update({ languageCode: language.value }) },
-      h('option', { value: AUTO_LANGUAGE_CODE, selected: current.languageCode === AUTO_LANGUAGE_CODE }, STRINGS.home.autoLanguage),
-      LANGUAGES.map(l => h('option', { value: l.code, selected: current.languageCode === l.code, lang: l.code }, l.label)));
-    form.append(field(STRINGS.home.language, language));
+    form.language = h('select', { onchange: () => this.#onOptionsChanged({ languageCode: form.language.value }) },
+      h('option', { value: AUTO_LANGUAGE_CODE }, STRINGS.home.autoLanguage),
+      LANGUAGES.map(l => h('option', { value: l.code, lang: l.code }, l.label)));
 
-    const diarizeOn = current.diarizeByEngine[engine];
-    const diarize = h('input', { type: 'checkbox', checked: diarizeOn, onchange: () => {
-      settings.update({ diarizeByEngine: { ...settings.current.diarizeByEngine, [engine]: diarize.checked } });
-      this.#draw();
+    form.diarize = h('input', { type: 'checkbox', onchange: () => {
+      const { engineKind, diarizeByEngine } = settings.current;
+      this.#onOptionsChanged({ diarizeByEngine: { ...diarizeByEngine, [engineKind]: form.diarize.checked } });
     } });
-    form.append(h('div', { class: 'field' },
-      h('label', { class: 'choice' }, diarize, h('span', {}, STRINGS.home.diarize)),
-      engine === ENGINE_KINDS.LOCAL ? h('p', { class: 'hint' }, STRINGS.home.diarizeLocalHint) : null));
-    if (diarizeOn) {
-      const speakers = h('select', { onchange: () => settings.update({ expectedSpeakers: speakers.value ? Number(speakers.value) : null }) },
-        h('option', { value: '', selected: current.expectedSpeakers == null }, STRINGS.home.speakersAuto),
-        Array.from({ length: MAX_SPEAKER_CHOICE }, (_, i) => h('option', { value: String(i + 1), selected: current.expectedSpeakers === i + 1 }, String(i + 1))));
-      form.append(field(STRINGS.home.speakers, speakers));
-    }
+    form.diarizeHint = h('p', { class: 'hint', hidden: true });
 
-    if (engine === ENGINE_KINDS.LOCAL) form.append(this.#qualityField(current.localQualityPreset));
+    form.speakers = h('select', { onchange: () => this.#onOptionsChanged({ expectedSpeakers: form.speakers.value ? Number(form.speakers.value) : null }) },
+      h('option', { value: '' }, STRINGS.home.speakersAuto),
+      Array.from({ length: MAX_SPEAKER_CHOICE }, (_, i) => h('option', { value: String(i + 1) }, String(i + 1))));
+    form.speakersField = field(STRINGS.home.speakers, form.speakers);
 
-    const blocked = !(this.#availability && this.#availability.available) || (this.#fileInfo && !this.#fileInfo.hasAudio) || this.#deps.job.isRunning;
-    form.append(h('div', { class: 'actions' }, h('button', { type: 'submit', class: 'primary large', disabled: blocked }, STRINGS.home.start)));
-    form.addEventListener('submit', event => { event.preventDefault(); if (!blocked) this.#start(); });
+    form.quality = h('select', { onchange: () => this.#onOptionsChanged({ localQuality: form.quality.value }) });
+    form.qualityField = field(STRINGS.home.quality, form.quality, STRINGS.common.loading);
+    form.qualityHint = form.qualityField.querySelector('.hint');
+    form.qualityField.hidden = true;
+
+    form.start = h('button', { type: 'submit', class: 'primary large', disabled: true }, STRINGS.home.start);
+    form.root = h('form', { class: 'card options', novalidate: true },
+      engines,
+      field(STRINGS.home.language, form.language),
+      h('div', { class: 'field' }, h('label', { class: 'choice' }, form.diarize, h('span', {}, STRINGS.home.diarize)), form.diarizeHint),
+      form.speakersField,
+      form.qualityField,
+      h('div', { class: 'actions' }, form.start));
+    form.root.addEventListener('submit', event => {
+      event.preventDefault();
+      if (this.#canStart()) this.#start();
+    });
     return form;
   }
 
-  #engineChoice(kind, selected) {
-    const texts = STRINGS.engines[kind] || { label: kind, hint: '' };
-    return h('label', { class: 'choice' },
-      h('input', { type: 'radio', name: 'engine', value: kind, checked: selected === kind, onchange: () => {
-        this.#deps.settings.update({ engineKind: kind });
-        this.#availability = null;
-        this.#draw();
-        this.#refreshAvailability();
-      } }),
-      h('span', {}, h('strong', {}, texts.label), h('span', { class: 'hint' }, texts.hint)));
+  /* ---------------------------------------------------------------- ενημερώσεις */
+
+  /**
+   * Η μία διαδρομή κάθε αλλαγής επιλογής (OO-017): αποθήκευση στις ρυθμίσεις,
+   * ενημέρωση των εξαρτημένων πεδίων, και ερώτηση στην υπηρεσία για την
+   * επιλεγμένη μηχανή (διαθεσιμότητα με όλες τις επιλογές, επίπεδα ποιότητας).
+   * @param {Partial<import('../../application/settings-service.js').Settings>|null} patch
+   */
+  #onOptionsChanged(patch) {
+    if (patch) this.#deps.settings.update(patch);
+    this.#refreshOptions();
+    this.#refreshAvailability();
+    this.#refreshQuality();
   }
 
-  /** Γιατί δεν ξεκινά η μεταγραφή (π.χ. λείπει κλειδί), με σύνδεσμο στις Ρυθμίσεις όπου βοηθά. */
-  #availabilityNotice() {
+  /** Τα πεδία από τις αποθηκευμένες ρυθμίσεις (ό,τι απέρριψαν οι ρυθμίσεις επανέρχεται). */
+  #refreshOptions() {
+    const form = this.#form;
+    const current = this.#deps.settings.current;
+    const engine = current.engineKind;
+    for (const [kind, radio] of form.engines) radio.checked = kind === engine;
+    form.language.value = current.languageCode;
+    const diarize = current.diarizeByEngine[engine];
+    form.diarize.checked = diarize;
+    const hint = STRINGS.engines[engine] && STRINGS.engines[engine].diarizeHint;
+    form.diarizeHint.textContent = hint || '';
+    form.diarizeHint.hidden = !hint;
+    form.speakersField.hidden = !diarize;
+    form.speakers.value = current.expectedSpeakers == null ? '' : String(current.expectedSpeakers);
+  }
+
+  /** Ρωτά αν η επιλεγμένη μηχανή τρέχει με τις τρέχουσες επιλογές. Μόνο η τελευταία απάντηση μετρά. */
+  #refreshAvailability() {
+    const request = ++this.#availabilityRequest;
+    const engine = this.#deps.settings.current.engineKind;
+    if (engine !== this.#availabilityEngine) {
+      // Άλλη μηχανή: η παλιά απάντηση δεν ισχύει, η «Έναρξη» περιμένει τη νέα.
+      this.#availabilityEngine = engine;
+      this.#showAvailability(null);
+    }
+    this.#deps.transcription.checkAvailability(engine, this.#recognitionOptions()).then(
+      availability => { if (request === this.#availabilityRequest) this.#showAvailability(availability); },
+      error => {
+        reportUnexpected(error);
+        if (request === this.#availabilityRequest) this.#showAvailability({ available: false, reason: ERROR_CODES.UNKNOWN });
+      });
+  }
+
+  /** @param {import('../../application/ports.js').Availability|null} availability */
+  #showAvailability(availability) {
+    this.#availability = availability;
+    const notice = this.#form.availability;
+    const blocked = Boolean(availability && !availability.available);
+    notice.hidden = !blocked;
+    if (blocked) {
+      const reason = availability.reason || ERROR_CODES.DEVICE_UNSUPPORTED;
+      replaceContent(notice, messageForCode(reason),
+        reason === ERROR_CODES.KEY_MISSING ? [' ', h('a', { href: hrefFor(ROUTES.settings()) }, STRINGS.home.goToSettings)] : null);
+    }
+    this.#refreshStart();
+  }
+
+  /** Το πεδίο ποιότητας, μόνο όταν η επιλεγμένη μηχανή έχει επίπεδα. */
+  #refreshQuality() {
+    const engine = this.#deps.settings.current.engineKind;
+    this.#qualityFor(engine).then(description => {
+      if (!this.#form || this.#deps.settings.current.engineKind !== engine) return;
+      const { quality, qualityField, qualityHint } = this.#form;
+      qualityField.hidden = !description;
+      if (!description) return;
+      if (this.#renderedQuality !== description) {
+        // Οι επιλογές αλλάζουν μόνο όταν αλλάζει η περιγραφή, όχι σε κάθε επιλογή του χρήστη.
+        this.#renderedQuality = description;
+        quality.replaceChildren(...qualityOptions(description, { withDownloadSize: true }));
+        qualityHint.textContent = description.accelerated ? STRINGS.home.webgpuYes : STRINGS.home.webgpuNo;
+      }
+      quality.value = this.#deps.settings.current.localQuality;
+    });
+  }
+
+  /** Τα επίπεδα ποιότητας μιας μηχανής, μία ερώτηση ανά μηχανή (δεν αλλάζουν όσο είναι ανοιχτή η σελίδα). */
+  #qualityFor(engine) {
+    if (!this.#qualityByEngine.has(engine)) {
+      this.#qualityByEngine.set(engine, this.#deps.transcription.describeQualityPresets(engine).catch(error => {
+        reportUnexpected(error);
+        return null;
+      }));
+    }
+    return this.#qualityByEngine.get(engine);
+  }
+
+  #refreshFileCard() {
+    const card = this.#fileCard;
+    const info = this.#fileInfo;
+    const problem = this.#fileError;
+    card.name.textContent = this.#file.name;
+    card.meta.textContent = info && info.durationSec != null ? `${formatBytes(this.#file.size)}, ${formatDuration(info.durationSec)}` : formatBytes(this.#file.size);
+    card.probing.hidden = Boolean(info || problem);
+    card.noAudio.hidden = !(info && !info.hasAudio);
+    card.problem.hidden = !problem;
+    card.problem.textContent = problem ? errorMessage(problem) : '';
+  }
+
+  #onJobChanged() {
+    const running = this.#deps.job.isRunning;
+    if (running === this.#jobRunning) return;
+    this.#jobRunning = running;
+    this.#jobNotice.hidden = !running;
+    this.#refreshStart();
+  }
+
+  #canStart() {
     const availability = this.#availability;
-    if (!availability || availability.available) return null;
-    const needsSettings = availability.reason === ERROR_CODES.KEY_MISSING;
-    return h('p', { class: 'warning' },
-      errorMessage({ code: availability.reason }),
-      needsSettings ? [' ', h('a', { href: hrefFor(ROUTES.settings()) }, STRINGS.home.goToSettings)] : null);
+    const noAudio = this.#fileInfo && !this.#fileInfo.hasAudio;
+    return Boolean(this.#file && availability && availability.available && !noAudio && !this.#deps.job.isRunning);
   }
 
-  #qualityField(selected) {
-    const { settings } = this.#deps;
-    const description = this.#qualityPresets;
-    const presets = description ? description.presets : [];
-    const autoLabel = description ? STRINGS.quality.autoResolves(qualityLabel(description.autoPresetId)) : qualityLabel(AUTO_LOCAL_QUALITY);
-    const select = h('select', { onchange: () => { settings.update({ localQualityPreset: select.value }); this.#refreshAvailability(); } },
-      h('option', { value: AUTO_LOCAL_QUALITY, selected: selected === AUTO_LOCAL_QUALITY }, autoLabel),
-      presets.map(p => h('option', { value: p.id, selected: selected === p.id, disabled: !p.available },
-        p.available ? `${qualityLabel(p.id)}, ${downloadSizeHint(p.approxDownloadMb)}` : `${qualityLabel(p.id)} (${STRINGS.quality.unavailable})`)));
-    const hint = description ? (description.accelerated ? STRINGS.home.webgpuYes : STRINGS.home.webgpuNo) : STRINGS.common.loading;
-    return field(STRINGS.home.quality, select, hint);
+  #refreshStart() {
+    if (this.#form) this.#form.start.disabled = !this.#canStart();
   }
+
+  /* ---------------------------------------------------------------- ενέργειες */
 
   async #selectFile(file) {
     this.#file = file;
     this.#fileInfo = null;
     this.#fileError = null;
-    if (this.#root) this.#draw();
+    if (this.#root) this.#showFile();
     try {
       const info = await this.#deps.mediaReader.probe(file);
       if (this.#file === file) this.#fileInfo = info;
     } catch (error) {
       if (this.#file === file) this.#fileError = error;
     }
-    if (this.#root && this.#file === file) this.#draw();
+    if (this.#root && this.#file === file) this.#showFile();
   }
 
   /** Οι επιλογές μεταγραφής από τις ρυθμίσεις. */
@@ -220,7 +345,7 @@ export class HomeView {
       languageCode: current.languageCode,
       diarize,
       expectedSpeakers: diarize ? current.expectedSpeakers : null,
-      localQualityPreset: current.localQualityPreset,
+      localQuality: current.localQuality,
     };
   }
 
@@ -241,7 +366,7 @@ export class HomeView {
       sessionMedia.attach(transcript.id, file);
       const path = ROUTES.transcript(transcript.id);
       if (router.currentPath === ROUTES.progress()) router.navigate(path);
-      else toasts.show(transcript.title || STRINGS.transcript.untitled, { tone: 'success', action: { label: STRINGS.common.open, run: () => router.navigate(path) } });
+      else toasts.show(displayTitle(transcript), { tone: 'success', action: { label: STRINGS.common.open, run: () => router.navigate(path) } });
     });
   }
 }

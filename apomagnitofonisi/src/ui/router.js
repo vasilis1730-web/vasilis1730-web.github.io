@@ -2,9 +2,16 @@
  * Δρομολόγηση με hash (#/history, #/t/<id>/summary): δουλεύει από στατικό
  * hosting χωρίς ρυθμίσεις server και μέσα στην εφαρμογή Android (TWA).
  *
+ * Κωδικοποίηση (API-017): τα ROUTES κωδικοποιούν κάθε παράμετρο ΜΙΑ φορά
+ * (encodeURIComponent) και ο router την αποκωδικοποιεί ΜΙΑ φορά, ανά
+ * παράμετρο. Το `currentPath` έχει την ίδια μορφή με το `navigate()` και τα
+ * ROUTES (κωδικοποιημένη), άρα `router.currentPath === ROUTES.transcript(id)`
+ * ισχύει για κάθε id. Ένα χαλασμένο hash (π.χ. `#/t/%`, κομμένος σύνδεσμος)
+ * δεν ταιριάζει σε καμία διαδρομή και πηγαίνει στην εναλλακτική, χωρίς σφάλμα.
+ *
  * @typedef {Object} Route
- * @property {string} pattern  π.χ. '/t/:id/summary'
- * @property {(params: Record<string, string>) => void} show
+ * @property {string} pattern  π.χ. '/t/:id/summary' (μόνο ASCII)
+ * @property {(params: Record<string, string>) => void} show  οι παράμετροι αποκωδικοποιημένες
  */
 export class HashRouter {
   #routes;
@@ -25,15 +32,19 @@ export class HashRouter {
     this.#dispatch();
   }
 
-  /** Πλοήγηση: νέα εγγραφή στο ιστορικό του browser. */
+  /**
+   * Πλοήγηση: νέα εγγραφή στο ιστορικό του browser.
+   * @param {string} path  διαδρομή από τα ROUTES (κωδικοποιημένη)
+   */
   navigate(path) {
     const hash = `#${path}`;
     if (this.#window.location.hash === hash) this.#dispatch();
     else this.#window.location.hash = hash;
   }
 
+  /** Η τρέχουσα διαδρομή, στην ίδια (κωδικοποιημένη) μορφή με τα ROUTES. */
   get currentPath() {
-    return decodeURI(this.#window.location.hash.replace(/^#/, '')) || '/';
+    return this.#window.location.hash.replace(/^#/, '') || '/';
   }
 
   #dispatch() {
@@ -46,12 +57,28 @@ export class HashRouter {
   }
 }
 
+/** Ταίριασμα μιας διαδρομής: οι παράμετροι αποκωδικοποιημένες, ή null. */
 function compile(pattern) {
   const names = [];
   const regex = new RegExp(`^${pattern.replace(/\//g, '\\/').replace(/:([a-zA-Z]+)/g, (_, name) => { names.push(name); return '([^/]+)'; })}$`);
   return path => {
     const match = path.match(regex);
     if (!match) return null;
-    return Object.fromEntries(names.map((name, i) => [name, decodeURIComponent(match[i + 1])]));
+    const params = {};
+    for (const [index, name] of names.entries()) {
+      const value = decodeOnce(match[index + 1]);
+      if (value === null) return null;
+      params[name] = value;
+    }
+    return params;
   };
+}
+
+/** Μία αποκωδικοποίηση, ή null για χαλασμένη κωδικοποίηση (π.χ. σκέτο «%»). */
+function decodeOnce(text) {
+  try {
+    return decodeURIComponent(text);
+  } catch {
+    return null;
+  }
 }

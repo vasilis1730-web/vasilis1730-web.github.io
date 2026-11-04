@@ -17,8 +17,10 @@ import { ExportService } from './application/export-service.js';
 import { LibraryService } from './application/library-service.js';
 import { TranscriptEditor } from './application/transcript-editor.js';
 import { SettingsService } from './application/settings-service.js';
-import { ApiKeyService, KEY_PROVIDERS } from './application/api-key-service.js';
-import { DataErasureService, ERASE_TARGETS } from './application/data-erasure-service.js';
+import { ApiKeyService } from './application/api-key-service.js';
+import { KEY_PROVIDERS } from './application/key-providers.js';
+import { DataErasureService } from './application/data-erasure-service.js';
+import { ERASE_TARGETS } from './application/erase-targets.js';
 
 import { createModuleLoader } from './infrastructure/vendor-loader.js';
 import { MediabunnyMediaReader } from './infrastructure/media/mediabunny-media-reader.js';
@@ -38,12 +40,12 @@ import { createCachedCapabilityDetector } from './infrastructure/platform/capabi
 import { ScreenWakeLock } from './infrastructure/platform/wake-lock.js';
 import { BrowserFileDelivery } from './infrastructure/platform/file-delivery.js';
 import { BrowserClipboard } from './infrastructure/platform/clipboard.js';
-import { SharedFileInbox } from './infrastructure/platform/shared-file-inbox.js';
-import { ModelCache } from './infrastructure/platform/model-cache.js';
+import { BrowserSharedFileInbox } from './infrastructure/platform/shared-file-inbox.js';
+import { BrowserModelCache } from './infrastructure/platform/model-cache.js';
 import { ServiceWorkerClient } from './infrastructure/platform/service-worker-client.js';
 import { systemClock } from './infrastructure/platform/system-clock.js';
 import { createRandomIdGenerator } from './infrastructure/platform/random-ids.js';
-import { TxtTranscriptExporter, SrtTranscriptExporter, VttTranscriptExporter, JsonTranscriptExporter, MarkdownSummaryExporter } from './infrastructure/export/text-exporters.js';
+import { TxtTranscriptExporter, SrtTranscriptExporter, VttTranscriptExporter, JsonTranscriptExporter, TxtSummaryExporter } from './infrastructure/export/text-exporters.js';
 import { DocxTranscriptExporter, DocxSummaryExporter } from './infrastructure/export/docx-exporters.js';
 
 import { STRINGS, speakerLabelFor } from './ui/strings.js';
@@ -80,7 +82,7 @@ async function main() {
   const detectCapabilities = createCachedCapabilityDetector();
 
   const repository = new IndexedDbTranscriptRepository({ indexedDB: window.indexedDB });
-  const keyStore = new BrowserKeyStore({ deviceStorage: browserStorage('localStorage'), sessionStorage: browserStorage('sessionStorage') });
+  const keyStore = new BrowserKeyStore({ localStorage: browserStorage('localStorage'), sessionStorage: browserStorage('sessionStorage') });
   const deviceStorage = new BrowserDeviceStorage({ storageManager: navigator.storage });
   const ids = createRandomIdGenerator(window.crypto);
   const mediaReader = new FallbackMediaReader({
@@ -103,8 +105,8 @@ async function main() {
   const labels = createExportLabels();
   const fileDelivery = new BrowserFileDelivery({ document, navigator, URL });
   const clipboard = new BrowserClipboard({ navigator });
-  const modelCache = new ModelCache({ caches: window.caches });
-  const sharedInbox = new SharedFileInbox({ caches: window.caches });
+  const modelCache = new BrowserModelCache({ caches: window.caches });
+  const sharedInbox = new BrowserSharedFileInbox({ caches: window.caches });
   const sessionMedia = new SessionMedia({ URL });
 
   /* ---------------------------------------------------------------- υπηρεσίες */
@@ -126,13 +128,16 @@ async function main() {
       new VttTranscriptExporter(),
       new JsonTranscriptExporter({ clock: systemClock, appVersion: APP_VERSION }),
     ],
-    summaryExporters: [new DocxSummaryExporter({ labels }), new MarkdownSummaryExporter({ labels })],
+    summaryExporters: [new DocxSummaryExporter({ labels }), new TxtSummaryExporter({ labels })],
     summaryFileSuffixFor,
     untitledFileName: STRINGS.transcript.untitled,
   });
   const library = new LibraryService({ repository, idGenerator: ids, deviceStorage });
   const editor = new TranscriptEditor({ repository, clock: systemClock });
+  const job = new TranscriptionJob({ service: transcription, wakeLock: new ScreenWakeLock({ navigator, document }) });
   const dataErasure = new DataErasureService({
+    // Πρώτα σταματά η μεταγραφή που τρέχει (και ο worker με τις λήψεις μοντέλων), μετά σβήνονται όλα.
+    beforeErase: [() => job.cancelAndSettle()],
     targets: [
       { name: ERASE_TARGETS.TRANSCRIPTS, erase: () => library.clear() },
       { name: ERASE_TARGETS.KEYS, erase: () => apiKeys.clear() },
@@ -142,7 +147,6 @@ async function main() {
       { name: ERASE_TARGETS.SESSION_MEDIA, erase: () => sessionMedia.clear() },
     ],
   });
-  const job = new TranscriptionJob({ service: transcription, wakeLock: new ScreenWakeLock({ navigator, document }) });
 
   /* ---------------------------------------------------------------- διεπαφή */
   const shell = new AppShell({ document, root: document.getElementById('app'), privacyHref: PRIVACY_PAGE_PATH });
@@ -163,7 +167,7 @@ async function main() {
       },
       { pattern: ROUTE_PATTERNS.PROGRESS, show: () => shell.show(new ProgressView({ job, router })) },
       { pattern: ROUTE_PATTERNS.TRANSCRIPT, show: params => shell.show(new TranscriptView({ library, editor, exports, fileDelivery, clipboard, sessionMedia, toasts }, params)) },
-      { pattern: ROUTE_PATTERNS.SUMMARY, show: params => shell.show(new SummaryView({ library, summaries, editor, exports, settings, apiKeys, fileDelivery, clipboard, toasts }, params)) },
+      { pattern: ROUTE_PATTERNS.SUMMARY, show: params => shell.show(new SummaryView({ library, summaries, settings, editor, exports, fileDelivery, clipboard, toasts }, params)) },
       { pattern: ROUTE_PATTERNS.HISTORY, show: () => shell.show(new HistoryView({ library, router, toasts })) },
       {
         pattern: ROUTE_PATTERNS.SETTINGS,

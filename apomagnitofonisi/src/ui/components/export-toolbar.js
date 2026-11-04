@@ -4,11 +4,13 @@
  *
  * Κοινή χρήση (OO-004): η μορφή (Word, αλλιώς κείμενο) αποφασίζεται ΜΙΑ φορά
  * ανά έκδοση της μεταγραφής, με τον ίδιο τύπο αρχείου που θα σταλεί, και το
- * κουμπί εμφανίζεται μόνο όταν η συσκευή μοιράζεται κάποια από αυτές.
+ * κουμπί εμφανίζεται μόνο όταν η συσκευή μοιράζεται κάποια από αυτές. Το
+ * αρχείο φτιάχνεται μέσα στην ενέργεια, ώστε ένα σφάλμα του να φαίνεται.
  */
 import { h } from '../dom.js';
 import { STRINGS, exportFormatLabel } from '../strings.js';
 import { runAction } from '../feedback.js';
+import { displayTitle } from '../presentation.js';
 import { ROUTES, hrefFor } from '../routes.js';
 
 export class ExportToolbar {
@@ -55,9 +57,10 @@ export class ExportToolbar {
     return this.#root;
   }
 
-  /** Η μεταγραφή που αφορούν οι ενέργειες (σε κάθε αλλαγή της). */
+  /** Η μεταγραφή που αφορούν οι ενέργειες (σε κάθε νέα έκδοσή της, OO-016). */
   setTranscript(transcript) {
     this.element();
+    if (transcript === this.#transcript) return;
     this.#transcript = transcript;
     this.#summaryLink.href = hrefFor(ROUTES.summary(transcript.id));
     if (this.#shareCheckedFor !== transcript.updatedAt) {
@@ -72,12 +75,14 @@ export class ExportToolbar {
   }
 
   #copyAll() {
-    return runAction(this.#toasts, () => this.#clipboard.copyText(this.#exports.clipboardText(this.#transcript)), { success: STRINGS.common.copied });
+    return runAction(this.#toasts, () => this.#clipboard.copyText(this.#exports.exportClipboardText(this.#transcript)), { success: STRINGS.common.copied });
   }
 
   #share() {
-    if (!this.#shareFormat) return undefined;
-    const file = this.#exports.exportTranscript(this.#transcript, this.#shareFormat);
-    return runAction(this.#toasts, () => this.#fileDelivery.share(file, this.#transcript.title || STRINGS.transcript.untitled));
+    const format = this.#shareFormat;
+    const transcript = this.#transcript;
+    if (!format) return undefined;
+    // Η κοινή χρήση θέλει την ενέργεια του χρήστη: το αρχείο φτιάχνεται σύγχρονα, πριν από κάθε αναμονή.
+    return runAction(this.#toasts, () => this.#fileDelivery.share(this.#exports.exportTranscript(transcript, format), displayTitle(transcript)));
   }
 }

@@ -2,17 +2,22 @@
  * Ο πίνακας ομιλητών μιας μεταγραφής: χρώμα, όνομα που αλλάζει, χρόνος
  * ομιλίας και «Νέος ομιλητής». Κάθε γραμμή φτιάχνεται μία φορά και ενημερώνεται
  * επί τόπου (OO-001): μια μετονομασία δεν ξαναχτίζει τη σελίδα.
+ *
+ * Παίρνει κάθε νέα έκδοση της μεταγραφής με το setTranscript, όπως και τα
+ * άλλα μέρη της σελίδας (OO-016, API-011), και δεν κάνει τίποτα όταν δεν
+ * άλλαξαν ούτε οι ομιλητές ούτε τα τμήματα (από τα τμήματα βγαίνει ο χρόνος ομιλίας).
  */
 import { h } from '../dom.js';
 import { STRINGS } from '../strings.js';
 import { formatDuration } from '../formatters.js';
-import { speakerTalkTime } from '../../domain/transcript.js';
+import { speakerTalkTime, MAX_SPEAKER_LABEL_LENGTH } from '../../domain/transcript.js';
 
 export class SpeakersPanel {
   #onRename;
   #onAdd;
   #root = null;
   #list = null;
+  #transcript = null;
   /** @type {Map<string, { item: HTMLElement, input: HTMLInputElement, meta: HTMLElement, rendered: string }>} */
   #rows = new Map();
 
@@ -38,9 +43,12 @@ export class SpeakersPanel {
     return this.#root;
   }
 
-  /** Ενημέρωση από τη μεταγραφή: νέες γραμμές, ονόματα, χρώματα και χρόνοι. */
-  update(transcript) {
+  /** Νέα έκδοση της μεταγραφής: νέες γραμμές, ονόματα, χρώματα και χρόνοι, μόνο αν άλλαξαν. */
+  setTranscript(transcript) {
     this.element();
+    const previous = this.#transcript;
+    this.#transcript = transcript;
+    if (previous && previous.speakers === transcript.speakers && previous.segments === transcript.segments) return;
     const talk = speakerTalkTime(transcript);
     const seen = new Set();
     for (const speaker of transcript.speakers) {
@@ -73,7 +81,7 @@ export class SpeakersPanel {
   }
 
   #createRow(speakerId) {
-    const input = h('input', { type: 'text', maxLength: 80 });
+    const input = h('input', { type: 'text', maxLength: MAX_SPEAKER_LABEL_LENGTH });
     input.addEventListener('change', () => this.#onRename(speakerId, input.value));
     const meta = h('span', { class: 'meta' });
     const item = h('li', {}, h('span', { class: 'swatch', 'aria-hidden': 'true' }), input, meta);

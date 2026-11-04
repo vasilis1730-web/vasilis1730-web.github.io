@@ -38,8 +38,12 @@ function corsHeaders(origin) {
 /**
  * Ψεύτικο api.elevenlabs.io: /v1/user (έλεγχος κλειδιού) και /v1/speech-to-text.
  * Καταγράφει τα αιτήματα (headers και πεδία) για έλεγχο από το test.
+ *
+ * Το `beforeTranscribe` καθυστερεί την απάντηση της μεταγραφής όσο θέλει το
+ * test (π.χ. για να πατήσει «Ακύρωση»). Αν η σελίδα ακυρώσει στο μεταξύ το
+ * αίτημα, η απάντηση απλώς δεν στέλνεται.
  */
-export async function mockElevenLabs(page, base, { words, languageCode = 'ell', durationSec = 2 }) {
+export async function mockElevenLabs(page, base, { words, languageCode = 'ell', durationSec = 2, beforeTranscribe = null }) {
   const calls = [];
   await page.route('https://api.elevenlabs.io/**', async route => {
     const request = route.request();
@@ -50,9 +54,13 @@ export async function mockElevenLabs(page, base, { words, languageCode = 'ell', 
       await route.fulfill({ status: 200, contentType: 'application/json', headers: corsHeaders(base), body: JSON.stringify({ subscription: { tier: 'creator' } }) });
       return;
     }
+    if (beforeTranscribe) await beforeTranscribe();
     await route.fulfill({
       status: 200, contentType: 'application/json', headers: corsHeaders(base),
       body: JSON.stringify({ language_code: languageCode, language_probability: 0.99, text: words.map(w => w.text).join(' '), words, audio_duration_secs: durationSec }),
+    }).catch(error => {
+      // Μόνο όταν το test κράτησε την απάντηση: η σελίδα μπορεί να έχει ακυρώσει το αίτημα.
+      if (!beforeTranscribe) throw error;
     });
   });
   return calls;

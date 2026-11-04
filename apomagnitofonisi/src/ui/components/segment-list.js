@@ -3,10 +3,12 @@
  * κείμενο που διορθώνεται επί τόπου, αναζήτηση με επισήμανση και επισήμανση
  * του τμήματος που ακούγεται.
  *
- * Οι γραμμές φτιάχνονται μία φορά ανά μεταγραφή (setTranscript) και μετά
- * ενημερώνονται μόνο όσες αλλάζουν (OO-001): μια αλλαγή ομιλητή ή κειμένου
- * δεν ξαναχτίζει χίλιες γραμμές, και η επισήμανση του τρέχοντος τμήματος
- * ξεκινά πάντα από την αρχή όταν ξαναχτιστεί η λίστα.
+ * Κάθε νέα έκδοση της μεταγραφής έρχεται με το setTranscript (OO-016). Η
+ * λίστα τη συγκρίνει με την προηγούμενη ανά αναφορά (το μοντέλο είναι
+ * αμετάβλητο) και ενημερώνει μόνο τις γραμμές που άλλαξαν (OO-001): μια αλλαγή
+ * ομιλητή ή κειμένου δεν ξαναχτίζει χίλιες γραμμές. Οι γραμμές χτίζονται από
+ * την αρχή μόνο για άλλη μεταγραφή ή άλλα τμήματα, και τότε η επισήμανση του
+ * τρέχοντος τμήματος ξεκινά από την αρχή.
  */
 import { h, field } from '../dom.js';
 import { STRINGS, matchesFound } from '../strings.js';
@@ -25,6 +27,7 @@ export class SegmentList {
   /** @type {Map<string, { item: HTMLElement, chip: HTMLElement|null, text: HTMLElement }>} */
   #rows = new Map();
   #order = [];
+  #withChips = false;
   #query = '';
   #currentIndex = -1;
 
@@ -56,35 +59,28 @@ export class SegmentList {
     return this.#root;
   }
 
-  /** Νέα μεταγραφή: οι γραμμές χτίζονται από την αρχή. */
+  /** Νέα έκδοση της μεταγραφής: ενημερώνονται μόνο οι γραμμές που άλλαξαν. */
   setTranscript(transcript) {
     this.element();
+    const previous = this.#transcript;
     this.#transcript = transcript;
-    this.#rows.clear();
-    this.#order = transcript.segments.map(s => s.id);
-    this.#currentIndex = -1;
-    this.#list.replaceChildren(...transcript.segments.map(segment => this.#createRow(segment)));
-    this.#applySearch();
-  }
-
-  /** Ενημέρωση μίας γραμμής μετά από αλλαγή του τμήματός της. */
-  updateSegment(transcript, segmentId) {
-    this.#transcript = transcript;
-    const segment = transcript.segments.find(s => s.id === segmentId);
-    const row = this.#rows.get(segmentId);
-    if (!segment || !row) return;
-    this.#renderSpeaker(row, segment);
-    if (document.activeElement !== row.text) this.#renderText(row, segment.text);
-    row.item.hidden = !matchesQuery(segment.text, this.#query);
-  }
-
-  /** Ενημέρωση των ονομάτων και χρωμάτων ομιλητών σε όλες τις γραμμές (χωρίς νέες γραμμές). */
-  updateSpeakers(transcript) {
-    this.#transcript = transcript;
-    for (const segment of transcript.segments) {
+    if (!previous || needsRebuild(previous, transcript)) { this.#rebuild(); return; }
+    if (previous.segments === transcript.segments && previous.speakers === transcript.speakers) return;
+    const speakersChanged = previous.speakers !== transcript.speakers;
+    transcript.segments.forEach((segment, index) => {
+      const before = previous.segments[index];
+      if (before === segment && !speakersChanged) return;
       const row = this.#rows.get(segment.id);
-      if (row) this.#renderSpeaker(row, segment);
-    }
+      if (speakersChanged || before.speakerId !== segment.speakerId) this.#renderSpeaker(row, segment);
+      if (before.text !== segment.text) this.#showText(row, segment);
+    });
+  }
+
+  /** Το κείμενο ενός τμήματος όπως είναι αποθηκευμένο (π.χ. μετά από διόρθωση που δεν αποθηκεύτηκε). */
+  restore(segmentId) {
+    const segment = this.#transcript && this.#transcript.segments.find(s => s.id === segmentId);
+    const row = this.#rows.get(segmentId);
+    if (segment && row) this.#showText(row, segment, { force: true });
   }
 
   /** Επισήμανση του τμήματος που ακούγεται τη στιγμή `seconds`. */
@@ -105,9 +101,25 @@ export class SegmentList {
     return index >= 0 ? this.#rows.get(this.#order[index]) : undefined;
   }
 
+  #rebuild() {
+    const transcript = this.#transcript;
+    this.#rows.clear();
+    this.#order = transcript.segments.map(s => s.id);
+    this.#currentIndex = -1;
+    this.#withChips = transcript.speakers.length > 0;
+    this.#list.replaceChildren(...transcript.segments.map(segment => this.#createRow(segment)));
+    this.#applySearch();
+  }
+
+  /** Κείμενο και ορατότητα (αναζήτηση) μιας γραμμής, εκτός αν τη διορθώνει τώρα ο χρήστης. */
+  #showText(row, segment, { force = false } = {}) {
+    if (force || document.activeElement !== row.text) this.#renderText(row, segment.text);
+    row.item.hidden = !matchesQuery(segment.text, this.#query.trim());
+  }
+
   #createRow(segment) {
     const time = h('button', { type: 'button', class: 'time', 'aria-label': `${STRINGS.transcript.playFrom} ${formatClock(segment.start)}`, onclick: () => this.#onSeek(segment.start) }, formatClock(segment.start));
-    const chip = this.#transcript.speakers.length
+    const chip = this.#withChips
       ? h('button', { type: 'button', class: 'speaker-chip', onclick: () => this.#onChooseSpeaker(segment.id) })
       : null;
     const text = h('p', { class: 'text', tabIndex: 0, lang: this.#transcript.languageCode || 'el', 'aria-label': STRINGS.transcript.editSegment });
@@ -173,4 +185,16 @@ export class SegmentList {
     const segment = this.#transcript.segments.find(s => s.id === segmentId);
     return segment ? segment.text : '';
   }
+}
+
+/**
+ * Οι γραμμές ξαναχτίζονται για άλλη μεταγραφή, για άλλα τμήματα (πλήθος ή
+ * σειρά), ή όταν εμφανίζεται ο πρώτος ομιλητής (οι γραμμές παίρνουν κουμπί ομιλητή).
+ */
+function needsRebuild(previous, next) {
+  if (previous.id !== next.id) return true;
+  if ((previous.speakers.length > 0) !== (next.speakers.length > 0)) return true;
+  if (previous.segments === next.segments) return false;
+  return previous.segments.length !== next.segments.length
+    || previous.segments.some((segment, index) => segment.id !== next.segments[index].id);
 }

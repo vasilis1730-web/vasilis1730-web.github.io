@@ -7,12 +7,11 @@
 import { ERROR_CODES, INPUT_ISSUES } from '../application/errors.js';
 import { PROGRESS_STAGES } from '../application/progress.js';
 import { EXPORT_FORMATS } from '../application/export-formats.js';
-import { ERASE_TARGETS } from '../application/data-erasure-service.js';
+import { ERASE_TARGETS } from '../application/erase-targets.js';
 import { ENGINE_KINDS, SUMMARY_KINDS } from '../domain/transcript.js';
 import { APP_NAME } from '../config/app-info.js';
 import { AUTO_LOCAL_QUALITY, LOCAL_QUALITY_PRESET_IDS, smallestLocalDownloadMb, SPEAKER_EMBEDDING_MODEL, ELEVENLABS_SCRIBE_USD_PER_HOUR } from '../config/models.js';
-
-const priceFormatter = new Intl.NumberFormat('el-GR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+import { formatPrice } from './number-format.js';
 
 export const STRINGS = Object.freeze({
   appName: APP_NAME,
@@ -63,7 +62,6 @@ export const STRINGS = Object.freeze({
     language: 'Γλώσσα',
     autoLanguage: 'Αυτόματη ανίχνευση',
     diarize: 'Διαχωρισμός ομιλητών',
-    diarizeLocalHint: `Πειραματικό στη συσκευή: κατεβαίνει και μοντέλο φωνής (${SPEAKER_EMBEDDING_MODEL.approxDownloadMb} MB).`,
     speakers: 'Αριθμός ομιλητών',
     speakersAuto: 'Αυτόματα',
     quality: 'Ποιότητα στη συσκευή',
@@ -95,10 +93,12 @@ export const STRINGS = Object.freeze({
       hint: 'Ο ήχος δεν φεύγει από τη συσκευή. Πιο αργό, μέτρια ακρίβεια στα ελληνικά.',
       short: 'Στη συσκευή',
       documentName: model => `Whisper στη συσκευή (${model})`,
+      // Προαιρετική υπόδειξη κάτω από τον «Διαχωρισμό ομιλητών» (CA-008).
+      diarizeHint: `Πειραματικό στη συσκευή: κατεβαίνει και μοντέλο φωνής (${SPEAKER_EMBEDDING_MODEL.approxDownloadMb} MB).`,
     },
     [ENGINE_KINDS.ELEVENLABS]: {
       label: 'ElevenLabs (ακριβέστερο, θέλει κλειδί)',
-      hint: `Ο ήχος στέλνεται στο ElevenLabs με το κλειδί σας. Περίπου ${priceFormatter.format(ELEVENLABS_SCRIBE_USD_PER_HOUR)} $ ανά ώρα ήχου.`,
+      hint: `Ο ήχος στέλνεται στο ElevenLabs με το κλειδί σας. Περίπου ${formatPrice(ELEVENLABS_SCRIBE_USD_PER_HOUR)} ανά ώρα ήχου.`,
       short: 'ElevenLabs',
       documentName: model => `ElevenLabs Scribe (${model})`,
     },
@@ -172,6 +172,7 @@ export const STRINGS = Object.freeze({
     costNote: 'Χρεώνεται στον λογαριασμό σας στην Anthropic.',
     generate: 'Σύνταξη',
     stop: 'Διακοπή',
+    stopped: 'Η σύνταξη διακόπηκε, το κείμενο δεν αποθηκεύτηκε.',
     writing: 'Γράφεται…',
     restarted: 'Το κείμενο ξαναγράφεται από εφεδρικό μοντέλο.',
     restartedDone: 'Το κείμενο γράφτηκε από εφεδρικό μοντέλο, γιατί το πρώτο αρνήθηκε.',
@@ -229,10 +230,11 @@ export const STRINGS = Object.freeze({
     modelsTitle: 'Μοντέλα στη συσκευή',
     modelsSize: 'Χώρος μοντέλων',
     deleteModels: 'Διαγραφή μοντέλων',
+    deleteModelsConfirm: 'Να διαγραφούν τα μοντέλα από τη συσκευή; Αν τρέχει μεταγραφή, θα σταματήσει.',
     modelsDeleted: 'Τα μοντέλα διαγράφηκαν. Θα ξανακατέβουν όταν χρειαστούν.',
     dataTitle: 'Δεδομένα',
     deleteEverything: 'Διαγραφή όλων των δεδομένων',
-    deleteEverythingConfirm: 'Να διαγραφούν όλες οι μεταγραφές, τα κλειδιά, οι ρυθμίσεις και τα μοντέλα από αυτή τη συσκευή; Δεν αναιρείται.',
+    deleteEverythingConfirm: 'Να διαγραφούν όλες οι μεταγραφές, τα κλειδιά, οι ρυθμίσεις και τα μοντέλα από αυτή τη συσκευή; Αν τρέχει μεταγραφή, θα σταματήσει. Δεν αναιρείται.',
     everythingDeleted: 'Όλα τα δεδομένα διαγράφηκαν από τη συσκευή.',
     eraseTargets: {
       [ERASE_TARGETS.TRANSCRIPTS]: 'μεταγραφές',
@@ -290,17 +292,27 @@ export const STRINGS = Object.freeze({
 /** «Ομιλητής 3»: η μία ονομασία για τους ομιλητές σε όλα τα στρώματα (API-008). */
 export const speakerLabelFor = ordinal => `Ομιλητής ${ordinal}`;
 
+const KNOWN_ERROR_CODES = new Set(Object.values(ERROR_CODES));
+
 /**
- * Μήνυμα για τον χρήστη από AppError: ανά κωδικό, και για το INVALID_INPUT
- * ανά αιτία (API-001). Ό,τι δεν είναι AppError (λάθος του κώδικα) → «Κάτι πήγε στραβά».
+ * Το μήνυμα ενός κωδικού σφάλματος, και για το INVALID_INPUT της αιτίας του
+ * (API-001, API-020), π.χ. για τον λόγο που μια μηχανή δεν είναι διαθέσιμη.
+ * Άγνωστος κωδικός → «Κάτι πήγε στραβά».
+ * @param {import('../application/errors.js').ErrorCode|string|null|undefined} code
+ * @param {string} [reason]  αιτία του INVALID_INPUT (INPUT_ISSUES)
+ */
+export function messageForCode(code, reason) {
+  if (code === ERROR_CODES.INVALID_INPUT && reason && STRINGS.inputIssues[reason]) return STRINGS.inputIssues[reason];
+  return KNOWN_ERROR_CODES.has(code) ? STRINGS.errors[code] : STRINGS.errors[ERROR_CODES.UNKNOWN];
+}
+
+/**
+ * Μήνυμα για τον χρήστη από σφάλμα: ο κωδικός του AppError (και η αιτία του).
+ * Ό,τι δεν είναι AppError (λάθος του κώδικα) → «Κάτι πήγε στραβά».
  */
 export function errorMessage(error) {
-  const code = error && error.code && STRINGS.errors[error.code] ? error.code : ERROR_CODES.UNKNOWN;
-  if (code === ERROR_CODES.INVALID_INPUT) {
-    const reason = error.details && error.details.reason;
-    if (reason && STRINGS.inputIssues[reason]) return STRINGS.inputIssues[reason];
-  }
-  return STRINGS.errors[code];
+  if (!error || typeof error.code !== 'string') return messageForCode(ERROR_CODES.UNKNOWN);
+  return messageForCode(error.code, error.details && error.details.reason);
 }
 
 /** Η ετικέτα μιας μορφής εξαγωγής, π.χ. «Word (.docx)» (OO-007). */
