@@ -1,0 +1,31 @@
+node_modules/
+dist/
+.wrangler/
+.env
+.env.*
+*.log
+.DS_Store
+
+# Δοκιμαστικά αρχεία ήχου που παράγονται τοπικά (tests/fixtures/generate.sh).
+tests/fixtures/generated/
+
+# Android: έξοδοι του Gradle και του workflow android.yml.
+android/*/.gradle/
+android/*/build/
+android/*/app/build/
+android/*/local.properties
+android/*/.idea/
+*.iml
+android-release/
+*.apk
+*.aab
+*.idsig
+# Το κλειδί υπογραφής και οι κωδικοί του ζουν ΜΟΝΟ στα GitHub secrets.
+*.keystore
+*.jks
+*.p12
+*.pfx
+signing-key-info.txt
+
+# Γραφικά καταχώρισης Google Play, παράγονται όταν χρειαστούν.
+store-assets/

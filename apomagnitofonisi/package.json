@@ -1,0 +1,21 @@
+{
+  "name": "apomagnitofonisi",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Απομαγνητοφώνηση: αρχεία ήχου και βίντεο σε κείμενο, στη συσκευή (Whisper) ή στο cloud (ElevenLabs Scribe), με ομιλητές, χρόνους, υπότιτλους, Word και πρακτικά με Claude. Στατική PWA στο Cloudflare Pages και εφαρμογή Android (TWA).",
+  "scripts": {
+    "test": "node --test \"tests/unit/**/*.test.mjs\" \"tests/infra/**/*.test.mjs\"",
+    "test:browser": "node --test --test-concurrency=1 \"tests/browser/**/*.test.mjs\"",
+    "build": "node tools/build-dist.mjs",
+    "icons": "node tools/make-icons.mjs",
+    "preview": "wrangler pages dev dist --port 8788"
+  },
+  "devDependencies": {
+    "playwright": "1.64.1",
+    "wrangler": "4.157.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
